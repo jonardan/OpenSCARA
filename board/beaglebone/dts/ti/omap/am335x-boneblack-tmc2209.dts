@@ -1,0 +1,60 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * BeagleBone Black + two BIGTREETECH TMC2209 stepper drivers
+ *
+ * Both drivers share one single-wire UART bus, told apart by their
+ * MS1/MS2 address straps:
+ *   P9_24  UART1_TXD  --[1k]--+-- PDN_UART of driver 1 and driver 2
+ *   P9_26  UART1_RXD  --------+
+ *
+ *   Motor 1 (UART address 0, MS1=GND MS2=GND)
+ *     P9_16  GPIO1_19   STEP
+ *     P9_18  GPIO0_4    DIR
+ *   Motor 2 (UART address 2, MS1=GND MS2=3.3V)
+ *     P9_28  GPIO3_17   STEP
+ *     P9_30  GPIO3_16   DIR
+ *
+ * P9_28 is normally the HDMI audio data line (McASP0 AXR2), so HDMI
+ * audio is disabled here to free it. HDMI video is unaffected.
+ */
+#include "am335x-boneblack.dts"
+
+/ {
+	model = "TI AM335x BeagleBone Black + 2x TMC2209";
+};
+
+&am33xx_pinmux {
+	pinctrl-0 = <&clkout2_pin &tmc2209_gpio_pins>;
+
+	tmc2209_uart1_pins: tmc2209-uart1-pins {
+		pinctrl-single,pins = <
+			AM33XX_PADCONF(AM335X_PIN_UART1_RXD, PIN_INPUT_PULLUP, MUX_MODE0)	/* P9_26 */
+			AM33XX_PADCONF(AM335X_PIN_UART1_TXD, PIN_OUTPUT_PULLUP, MUX_MODE0)	/* P9_24 */
+		>;
+	};
+
+	/* Pulled down so STEP/DIR stay low while no program drives them */
+	tmc2209_gpio_pins: tmc2209-gpio-pins {
+		pinctrl-single,pins = <
+			AM33XX_PADCONF(AM335X_PIN_GPMC_A3, PIN_OUTPUT_PULLDOWN, MUX_MODE7)	/* P9_16 STEP 1 */
+			AM33XX_PADCONF(AM335X_PIN_SPI0_D1, PIN_OUTPUT_PULLDOWN, MUX_MODE7)	/* P9_18 DIR 1 */
+			AM33XX_PADCONF(AM335X_PIN_MCASP0_AXR0, PIN_OUTPUT_PULLDOWN, MUX_MODE7)	/* P9_30 DIR 2 */
+			AM33XX_PADCONF(AM335X_PIN_MCASP0_AHCLKR, PIN_OUTPUT_PULLDOWN, MUX_MODE7)	/* P9_28 STEP 2 */
+		>;
+	};
+};
+
+&uart1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&tmc2209_uart1_pins>;
+	status = "okay";
+};
+
+/* HDMI audio off: releases P9_28 (McASP0 AHCLKR/AXR2) for STEP 2 */
+&mcasp0 {
+	status = "disabled";
+};
+
+&{/sound} {
+	status = "disabled";
+};

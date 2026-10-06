@@ -1,0 +1,3 @@
+# Buildroot output never lives here, but guard against an O= build in-tree
+/output/
+*.img
