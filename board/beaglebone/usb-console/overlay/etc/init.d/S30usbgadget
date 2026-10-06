@@ -1,0 +1,59 @@
+#!/bin/sh
+#
+# Expose a serial console (/dev/ttyGS0) over the BeagleBone mini-USB port.
+# On the host it shows up as /dev/ttyACM0.
+#
+
+G=/sys/kernel/config/usb_gadget/bbb
+
+start() {
+	printf "Starting USB serial gadget: "
+	modprobe musb_dsps 2>/dev/null
+	modprobe libcomposite || { echo "FAIL"; return 1; }
+	modprobe usb_f_acm
+	grep -q configfs /proc/mounts || mount -t configfs none /sys/kernel/config
+
+	# Wait for the USB device controller to appear
+	i=0
+	while [ -z "$(ls /sys/class/udc 2>/dev/null)" ] && [ $i -lt 50 ]; do
+		usleep 100000; i=$((i + 1))
+	done
+	UDC=$(ls /sys/class/udc 2>/dev/null | head -n 1)
+	[ -n "$UDC" ] || { echo "FAIL (no UDC)"; return 1; }
+
+	mkdir -p $G
+	echo 0x1d6b > $G/idVendor	# Linux Foundation
+	echo 0x0104 > $G/idProduct	# Multifunction Composite Gadget
+	mkdir -p $G/strings/0x409
+	echo "BeagleBone" > $G/strings/0x409/manufacturer
+	echo "BeagleBone Black Buildroot" > $G/strings/0x409/product
+	mkdir -p $G/configs/c.1/strings/0x409
+	echo "ACM" > $G/configs/c.1/strings/0x409/configuration
+	mkdir -p $G/functions/acm.usb0
+	ln -sf $G/functions/acm.usb0 $G/configs/c.1/
+	echo "$UDC" > $G/UDC
+
+	# Wait for mdev to create the tty node
+	i=0
+	while [ ! -e /dev/ttyGS0 ] && [ $i -lt 50 ]; do
+		usleep 100000; i=$((i + 1))
+	done
+	[ -e /dev/ttyGS0 ] && echo "OK" || echo "FAIL (no ttyGS0)"
+}
+
+stop() {
+	printf "Stopping USB serial gadget: "
+	[ -d $G ] || { echo "OK"; return 0; }
+	echo "" > $G/UDC 2>/dev/null
+	rm -f $G/configs/c.1/acm.usb0
+	rmdir $G/configs/c.1/strings/0x409 $G/configs/c.1 \
+		$G/functions/acm.usb0 $G/strings/0x409 $G 2>/dev/null
+	echo "OK"
+}
+
+case "$1" in
+	start) start ;;
+	stop) stop ;;
+	restart|reload) stop; start ;;
+	*) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac

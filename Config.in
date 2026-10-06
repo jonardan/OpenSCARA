@@ -1,0 +1,1 @@
+source "$BR2_EXTERNAL_ROBOTARM_PATH/package/tmc2209ctl/Config.in"

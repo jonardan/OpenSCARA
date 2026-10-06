@@ -1,0 +1,26 @@
+#!/bin/sh
+#
+# Configure all TMC2209 stepper drivers listed in /etc/tmc2209.conf at boot.
+# Fails harmlessly if the 12V motor supply is off; tmc2209ctl re-applies
+# the configuration automatically once a driver is powered.
+#
+
+case "$1" in
+	start)
+		printf "Configuring TMC2209 drivers: "
+		if tmc2209ctl -m all init >/dev/null 2>&1; then
+			echo "OK"
+		else
+			echo "not all responding (12V off?)"
+		fi
+		;;
+	stop)
+		tmc2209ctl -m all disable >/dev/null 2>&1
+		;;
+	restart|reload)
+		"$0" start
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart}"
+		exit 1
+esac
