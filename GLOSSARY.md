@@ -13,3 +13,7 @@
 **Homed**: the flag in `/run/scara.pos` saying a joint's position is known. Disabling a motor, a driver reset, `run` or a reboot clears it; arm-level moves refuse to run without it.
 
 **Joint limits**: `min_angle`..`max_angle` per joint, the range `scara joint` may move to, measured on the arm with a 5° margin.
+
+**Elbow side**: most X/Y points can be reached two ways, mirror images about the line from the shoulder to the tip: the elbow bent counter-clockwise (+, θ2 > 0) or clockwise (−, θ2 < 0). Without a choice, the one inside the joint limits is used, the closer to the current pose if both are.
+
+**Reach**: from |link1_mm − link2_mm| to link1_mm + link2_mm from the shoulder axis (29.0 to 361.8 mm), less what the joint limits cut off.

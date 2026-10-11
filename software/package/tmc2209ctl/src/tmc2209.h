@@ -75,6 +75,8 @@ struct config {
 	int joint_teeth;	/*   of a revolution per motor revolution */
 	double min_angle;	/* safe joint range (deg); both 0 = not */
 	double max_angle;	/*   measured yet: scara joint refuses */
+	double link1_mm;	/* shoulder axis to elbow axis (shared key) */
+	double link2_mm;	/* elbow axis to tool tip (shared key) */
 };
 
 extern struct config cfg, motors[MAX_MOTORS];

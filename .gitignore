@@ -1,3 +1,7 @@
 # Buildroot output never lives here, but guard against an O= build in-tree
 /software/output/
 *.img
+# Host builds (make, make test in software/package/tmc2209ctl/src)
+/software/package/tmc2209ctl/src/tmc2209ctl
+/software/package/tmc2209ctl/src/scara
+/software/package/tmc2209ctl/src/test_kinematics

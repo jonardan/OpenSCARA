@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "kinematics.h"
 #include "tmc2209.h"
 
 #define NJOINTS	2
@@ -38,9 +39,15 @@ static void usage(void)
 "                        angles outside min_angle..max_angle\n"
 "  jog J DEG [RPM]       turn joint J (1 shoulder, 2 elbow) by DEG degrees\n"
 "                        from where it is, ignoring the limits\n"
+"  fk A1 A2              print the tip X/Y (mm) for joint angles A1 A2\n"
+"  ik X Y [+|-]          print the joint angles for tip X/Y (mm); + or -\n"
+"                        picks the elbow side (default: one inside the\n"
+"                        limits, the closer to the current pose)\n"
+"                        fk and ik only compute, they don't move\n"
 "\n"
 "  Angles: shoulder from the +X axis, elbow from the line of link 1\n"
-"  (0 = straight), counter-clockwise positive seen from above.  RPM is\n"
+"  (0 = straight), counter-clockwise positive seen from above.  X/Y in\n"
+"  mm from the shoulder axis; angles 0 0 = arm straight along +X.  RPM is\n"
 "  the speed of the motor that moves furthest (default %.0f).\n"
 "  Ctrl-C decelerates a move to a stop.\n", motors[0].rpm);
 }
@@ -67,21 +74,119 @@ static int need_joints(void)
 	return 0;
 }
 
+/* The arm geometry and joint limits from the config file */
+static int get_arm(struct arm *a)
+{
+	a->l1 = motors[0].link1_mm;
+	a->l2 = motors[0].link2_mm;
+	if (a->l1 <= 0 || a->l2 <= 0) {
+		err("set link1_mm and link2_mm in %s", CONF_PATH);
+		return -1;
+	}
+	for (int j = 0; j < NJOINTS; j++) {
+		a->min[j] = motors[j].min_angle;
+		a->max[j] = motors[j].max_angle;
+	}
+	return 0;
+}
+
+/* Current joint angles into th[]; 0 if both joints are homed */
+static int get_angles(double th[NJOINTS])
+{
+	int j, ok = 1;
+
+	pos_load();
+	for (j = 0; j < NJOINTS; j++) {
+		double upd = usteps_per_deg(j);
+
+		if (upd <= 0)
+			return -1;
+		th[j] = pos[j] / upd;
+		ok &= homed[j];
+	}
+	return ok ? 0 : 1;
+}
+
 static int cmd_where(void)
 {
-	double upd[NJOINTS];
-	int j;
+	double th[NJOINTS], x, y;
+	struct arm a;
+	int j, r = get_angles(th);
 
-	for (j = 0; j < NJOINTS; j++) {
-		upd[j] = usteps_per_deg(j);
-		if (upd[j] <= 0)
-			return -1;
-	}
-	pos_load();
+	if (r < 0)
+		return -1;
 	for (j = 0; j < NJOINTS; j++)
 		printf("joint %d (%s): %8.2f deg%s\n", j + 1, joint_name[j],
-		       pos[j] / upd[j],
+		       th[j],
 		       homed[j] ? "" : "  (not homed: relative to power-on)");
+	if (r == 0 && motors[0].link1_mm > 0 && motors[0].link2_mm > 0) {
+		get_arm(&a);
+		kin_forward(&a, th, &x, &y);
+		printf("tip: x %8.2f mm, y %8.2f mm\n", x, y);
+	}
+	return 0;
+}
+
+static int cmd_fk(int argc, char **argv)
+{
+	double th[NJOINTS], x, y;
+	struct arm a;
+
+	if (argc != 3) {
+		err("usage: fk A1 A2");
+		return -1;
+	}
+	if (parse_num(argv[1], &th[0]) || parse_num(argv[2], &th[1]) ||
+	    get_arm(&a))
+		return -1;
+	kin_forward(&a, th, &x, &y);
+	printf("tip: x %8.2f mm, y %8.2f mm\n", x, y);
+	return 0;
+}
+
+static int cmd_ik(int argc, char **argv)
+{
+	double x, y, th[NJOINTS], now[NJOINTS];
+	enum elbow side = ELBOW_ANY;
+	enum kin_result r;
+	struct arm a;
+
+	if (argc < 3 || argc > 4) {
+		err("usage: ik X Y [+|-]");
+		return -1;
+	}
+	if (parse_num(argv[1], &x) || parse_num(argv[2], &y) || get_arm(&a))
+		return -1;
+	if (argc > 3) {
+		if (!strcmp(argv[3], "+")) {
+			side = ELBOW_POS;
+		} else if (!strcmp(argv[3], "-")) {
+			side = ELBOW_NEG;
+		} else {
+			err("elbow side must be + or -");
+			return -1;
+		}
+	}
+	/* Joint limits not measured: kin_inverse would reject everything */
+	for (int j = 0; j < NJOINTS; j++) {
+		if (a.min[j] >= a.max[j]) {
+			err("joint %d (%s): set min_angle < max_angle in "
+			    "[motor%d] of %s", j + 1, joint_name[j], j + 1,
+			    CONF_PATH);
+			return -1;
+		}
+	}
+	/* Closer to the current pose, if it is known */
+	pos_load();
+	r = kin_inverse(&a, x, y, side,
+			homed[0] && homed[1] && get_angles(now) == 0 ? now : NULL,
+			th);
+	if (r != KIN_OK) {
+		err("%.2f, %.2f: %s", x, y, kin_strerror(r));
+		return -1;
+	}
+	printf("joint 1 (%s): %8.2f deg\njoint 2 (%s): %8.2f deg\n",
+	       joint_name[0], th[0], joint_name[1], th[1]);
 	return 0;
 }
 
@@ -227,6 +332,10 @@ int main(int argc, char **argv)
 		return cmd_jog(argc, argv) ? 1 : 0;
 	if (!strcmp(c, "home"))
 		return cmd_home(argc, argv) ? 1 : 0;
+	if (!strcmp(c, "fk"))
+		return cmd_fk(argc, argv) ? 1 : 0;
+	if (!strcmp(c, "ik"))
+		return cmd_ik(argc, argv) ? 1 : 0;
 	err("unknown command '%s' (try 'scara help')", c);
 	return 1;
 }

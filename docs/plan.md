@@ -146,6 +146,9 @@ outside `|L1 − L2| ≤ r ≤ L1 + L2` or outside the joint limits.
 Test on the PC: `make test` checks IK(FK(θ)) = θ over a grid of angles,
 known points (straight arm → (L1+L2, 0)), and unreachable points.
 
+Done: also `scara fk A1 A2` / `scara ik X Y [+|-]` (compute only), and
+`scara where` already prints x, y, so step 6 only adds `goto`.
+
 ### 6. Move to a point: `scara goto X Y`
 
 IK, then the joint move from step 4. `scara where` also prints x, y.
