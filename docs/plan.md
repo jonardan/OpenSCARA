@@ -18,19 +18,23 @@ the step that first needs them.
 |---|---|---|---|
 | `steps_per_rev` | full steps per motor revolution | 200 | 4 |
 | `microsteps` | TMC2209 microstepping | 16 | 4 |
-| `motor_teeth` (per motor) | GT2 teeth on the motor pulley | TBD | 4 |
-| `joint_teeth` (per motor) | GT2 teeth on the joint pulley | TBD | 4 |
+| `motor_teeth` (per motor) | GT2 teeth on the motor pulley | 20 / 20 | 4 |
+| `joint_teeth` (per motor) | GT2 teeth on the joint pulley | 72 (shoulder) / 45 (elbow) | 4 |
 | `home_angle` (per motor) | joint angle (deg) when its endstop clicks | TBD | 3 |
 | `home_dir` (per motor) | direction to turn to reach the endstop (+1/−1) | TBD | 3 |
 | `min_angle`, `max_angle` (per motor) | safe joint range (deg) | TBD | 4 |
 | `endstop_line`, `endstop_nc` (per motor) | GPIO line, normally-closed switch | P9_14 / P9_22, 0 | 2 |
-| `link1_mm` | shoulder axis to elbow axis | TBD | 5 |
-| `link2_mm` | elbow axis to tool tip | TBD | 5 |
+| `link1_mm` | shoulder axis to elbow axis | 195.4 | 5 |
+| `link2_mm` | elbow axis to tool tip | 166.4 | 5 |
 | `led_line` | GPIO line for the tip LED | P9_23 (proposed) | 8 |
 
 Mechanics: motor 1 sits on the base and turns link 1 (shoulder). Motor 2
 rides on link 1 and turns link 2 (elbow), so the elbow angle is relative to
 link 1 and needs no belt-coupling correction.
+
+With these values: shoulder 3.6:1, 200 × 16 × 72 / 20 / 360 = **32 microsteps
+per degree**; elbow 2.25:1, 200 × 16 × 45 / 20 / 360 = **20 microsteps per
+degree**. Reach: 29.0 mm to 361.8 mm from the shoulder axis.
 
 Conventions (also go in `GLOSSARY.md` in step 4):
 
