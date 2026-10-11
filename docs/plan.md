@@ -81,7 +81,8 @@ For each selected motor: turn toward the switch (`home_dir`) at a slow
 speed until it reads pressed, back off a few degrees, approach again at
 a slower speed, stop on the click. Give up with an error after a maximum
 travel (one joint revolution) so a broken switch can't wind the arm into
-its hard stop. Moving away first if the switch is already pressed.
+its hard stop. If the switch is already pressed at the start, move away
+from it first.
 The stepping loop checks the endstop between pulses, so this needs a
 "move until" variant of `move_axes`. Writes `/run/scara.pos` with
 the joint at `home_angle`, homed = 1.
