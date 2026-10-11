@@ -79,6 +79,7 @@ struct config {
 	double link2_mm;	/* elbow axis to tool tip (shared key) */
 	double line_speed;	/* default tip speed for lines, mm/s (shared) */
 	double line_accel;	/* tip acceleration for lines, mm/s^2 (shared) */
+	double corner_deg;	/* G-code: G1 lines bending less run as one */
 };
 
 extern struct config cfg, motors[MAX_MOTORS];
@@ -141,16 +142,18 @@ int move_axes(int count, const int *mi, const double *amount, int revs,
 /*
  * Stream a path through one stepping loop.  pts[i * count + k] is the
  * absolute position (usteps) of motor mi[k] at point i; pts[0..] must be
- * where the motors are now.  Points are seg apart along the path (any
- * length unit, e.g. mm); the path runs at *speed units/s, accelerating at
- * accel units/s^2 only at its start and end.  *speed is lowered first if a
- * segment would need a motor faster than its rpm (or MAX_STEP_RATE).
+ * where the motors are now.  dist[i] is how far point i is along the path
+ * (any length unit, e.g. mm; dist[0] = 0); the path runs at *speed
+ * units/s, accelerating at accel units/s^2 only at its start and end.
+ * *speed is lowered first if a segment would need a motor faster than its
+ * rpm (or MAX_STEP_RATE).
  * Ctrl-C decelerates along the path and sets *interrupted.
  */
 #define PATH_V0_DIST	0.1	/* start/stop speed: reached after this distance */
 
 int move_path(int count, const int *mi, int npts, const long *pts,
-	      double seg, double *speed, double accel, int *interrupted);
+	      const double *dist, double *speed, double accel,
+	      int *interrupted);
 
 int home_motors(int n, const int *mi);
 

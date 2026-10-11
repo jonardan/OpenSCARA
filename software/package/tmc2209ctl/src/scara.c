@@ -330,19 +330,21 @@ static int cmd_goto(int argc, char **argv)
 }
 
 /*
- * line X Y [F]: the tip goes to X/Y in a straight line at F mm/s.  The
- * line is split into ~1 mm segments (line.c) streamed through one
- * stepping loop, so the tip neither curves nor stops at segment joins.
- * Every point is checked before anything moves.
+ * The tip goes through the points xy[0..n-1] in straight lines at speed
+ * mm/s, as one move: each line is split into ~1 mm segments (line.c) and
+ * all of them are streamed through one stepping loop, so the tip neither
+ * curves nor stops at the joins; it accelerates only at the start and
+ * stops only at the end.  Every point is checked before anything moves.
  */
-static int line_to(const struct arm *a, double x, double y, double speed)
+static int path_to(const struct arm *a, int n, const double (*xy)[2],
+		   double speed)
 {
 	static const int both[NJOINTS] = { 0, 1 };
-	double x0, y0, now[NJOINTS], upd[NJOINTS], (*th)[NJOINTS];
-	double asked, bx, by;
+	double x0, y0, now[NJOINTS], upd[NJOINTS], (*th)[NJOINTS] = NULL;
+	double asked, bx, by, *dist = NULL;
 	enum kin_result r;
-	int i, j, npts, interrupted, ret = -1;
-	long *pts;
+	int i, j, k, np, off, npts, interrupted, ret = -1;
+	long *pts = NULL;
 
 	if (speed <= 0) {
 		err("speed must be > 0 mm/s");
@@ -358,18 +360,38 @@ static int line_to(const struct arm *a, double x, double y, double speed)
 			return -1;
 	}
 	kin_forward(a, now, &x0, &y0);
-	npts = line_npts(hypot(x - x0, y - y0), LINE_SEG_MM);
+	npts = 1;
+	for (k = 0, bx = x0, by = y0; k < n; k++) {
+		npts += line_npts(hypot(xy[k][0] - bx, xy[k][1] - by),
+				  LINE_SEG_MM) - 1;
+		bx = xy[k][0];
+		by = xy[k][1];
+	}
 	th = malloc(npts * sizeof(*th));
 	pts = malloc(npts * NJOINTS * sizeof(*pts));
-	if (!th || !pts) {
+	dist = malloc(npts * sizeof(*dist));
+	if (!th || !pts || !dist) {
 		err("out of memory");
 		goto out;
 	}
-	r = line_plan(a, now, x, y, npts, th, &bx, &by);
-	if (r != KIN_OK) {
-		err("line to %.2f, %.2f: at %.2f, %.2f: %s", x, y, bx, by,
-		    kin_strerror(r));
-		goto out;
+	memcpy(th[0], now, sizeof(th[0]));
+	dist[0] = 0;
+	for (k = 0, off = 0; k < n; k++) {
+		double len = hypot(xy[k][0] - x0, xy[k][1] - y0);
+
+		np = line_npts(len, LINE_SEG_MM);
+		r = line_plan(a, th[off], xy[k][0], xy[k][1], np, th + off,
+			      &bx, &by);
+		if (r != KIN_OK) {
+			err("line to %.2f, %.2f: at %.2f, %.2f: %s", xy[k][0],
+			    xy[k][1], bx, by, kin_strerror(r));
+			goto out;
+		}
+		for (i = 1; i < np; i++)
+			dist[off + i] = dist[off] + len * i / (np - 1);
+		off += np - 1;
+		x0 = xy[k][0];
+		y0 = xy[k][1];
 	}
 	/* Point 0 is exactly where the motors are */
 	for (j = 0; j < NJOINTS; j++)
@@ -379,8 +401,7 @@ static int line_to(const struct arm *a, double x, double y, double speed)
 			pts[i * NJOINTS + j] = lround(th[i][j] * upd[j]);
 
 	asked = speed;
-	if (move_path(NJOINTS, both, npts, pts,
-		      hypot(x - x0, y - y0) / (npts - 1), &speed,
+	if (move_path(NJOINTS, both, npts, pts, dist, &speed,
 		      motors[0].line_accel, &interrupted))
 		goto out;
 	if (speed < asked)
@@ -394,7 +415,16 @@ static int line_to(const struct arm *a, double x, double y, double speed)
 out:
 	free(th);
 	free(pts);
+	free(dist);
 	return ret;
+}
+
+/* line X Y [F]: the tip goes to X/Y in a straight line at F mm/s */
+static int line_to(const struct arm *a, double x, double y, double speed)
+{
+	const double xy[1][2] = { { x, y } };
+
+	return path_to(a, 1, xy, speed);
 }
 
 /* line X Y [F] */
@@ -655,21 +685,105 @@ static int run_line(struct run *r, const struct gc_line *l, const char *text,
 	return l->end ? 1 : 0;
 }
 
-/* Run (or with dry only check) every line of the program */
+/*
+ * Look-ahead: from line i, a G1 move, the lines that run with it as one
+ * path: G1 moves at the same feed, turning by at most corner_deg at each
+ * join, with only lines that don't move (comments, G90/G91) in between.
+ * Fills xy[*n] with the points and *r with the state after the last line
+ * taken; returns the index of that line.
+ */
+static int chain(const struct prog *p, int i, struct run *r,
+		 double (*xy)[2], int *n)
+{
+	double cosmax = cos(motors[0].corner_deg * M_PI / 180);
+	double dx0 = 0, dy0 = 0;
+	struct run c = *r;
+	int k, last = i;
+
+	*n = 0;
+	for (k = i; k < p->n; k++) {
+		const struct gc_line *l = &p->l[k];
+		double sp = l->has_f ? l->f / 60 : c.speed;
+		int rel = l->dist ? l->dist == GC_REL : c.rel;
+		double tx, ty, dx, dy, len;
+
+		if (k > i && (l->home || l->tool || l->end || sp != c.speed ||
+			      (l->move && !l->motion)))
+			break;
+		if (l->move) {
+			tx = l->has_x ? l->x + (rel ? c.x : 0) : c.x;
+			ty = l->has_y ? l->y + (rel ? c.y : 0) : c.y;
+			dx = tx - c.x;
+			dy = ty - c.y;
+			len = hypot(dx, dy);
+			if (len >= MIN_MOVE_MM) {
+				if (*n && (dx * dx0 + dy * dy0) /
+				    (len * hypot(dx0, dy0)) < cosmax)
+					break;
+				xy[*n][0] = tx;
+				xy[*n][1] = ty;
+				(*n)++;
+				dx0 = dx;
+				dy0 = dy;
+			}
+			c.x = tx;
+			c.y = ty;
+		}
+		c.rel = rel;
+		c.speed = sp;
+		last = k;
+	}
+	*r = c;
+	return last;
+}
+
+/*
+ * Run (or with dry only check) every line of the program.  When running,
+ * G1 lines that chain() joins go as one path (path_to), without stopping
+ * at the joins; the dry run checked the same points line by line.
+ */
 static int prog_run(const struct prog *p, const struct arm *a, int dry)
 {
-	struct run r;
-	int i, ret;
+	double (*xy)[2] = NULL;
+	struct run r, c;
+	int i, k, n, last, ret = -1;
 
+	if (!dry && !(xy = malloc(p->n * sizeof(*xy)))) {
+		err("out of memory");
+		return -1;
+	}
 	run_init(&r, a, p->name, dry);
 	for (i = 0; i < p->n; i++) {
-		ret = run_line(&r, &p->l[i], p->text[i], i + 1);
-		if (ret < 0)
-			return -1;
-		if (ret)
+		const struct gc_line *l = &p->l[i];
+
+		if (!dry && r.is_homed && l->move && l->motion && !l->home &&
+		    !l->end && !stop_req && !stopped) {
+			c = r;
+			last = chain(p, i, &c, xy, &n);
+			if (n > 1) {
+				for (k = i; k <= last; k++)
+					printf("%d: %s\n", k + 1, p->text[k]);
+				if (path_to(a, n, (const double (*)[2])xy,
+					    c.speed) || get_angles(c.th)) {
+					err("%s:%d-%d: G1 path failed", p->name,
+					    i + 1, last + 1);
+					goto out;
+				}
+				r = c;
+				i = last;
+				continue;
+			}
+		}
+		k = run_line(&r, l, p->text[i], i + 1);
+		if (k < 0)
+			goto out;
+		if (k)
 			break;
 	}
-	return 0;
+	ret = 0;
+out:
+	free(xy);
+	return ret;
 }
 
 /*
