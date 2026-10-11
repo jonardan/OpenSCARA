@@ -206,6 +206,17 @@ gpioget $(gpiofind "P9_14 [ehrpwm1a]")    # motor 1: 1 = open, 0 = pressed
 gpioget $(gpiofind "P9_22 [spi0_sclk]")   # motor 2
 ```
 
+## Homing
+
+`tmc2209ctl home` homes motor 2 (elbow) and then motor 1 (shoulder):
+each joint turns toward its switch, backs off 5°, comes back slowly and
+stops on the click. More than one joint revolution without a click is an
+error, so an unplugged switch can't wind the arm into its hard stop. The
+direction toward each switch is `home_dir` in `tmc2209.conf`; it starts at
+0 (homing refuses to run) until checked on the arm, see
+`board/beaglebone/readme.txt`. After homing, `/run/scara.pos` holds each
+motor's position and a homed flag.
+
 ## Why STEP 2 is on P9_12 and not P9_28
 
 P9_28 is wired to the HDMI chip as an audio data line (McASP0 AXR2). Even with
