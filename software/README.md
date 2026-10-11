@@ -27,7 +27,7 @@ flowchart LR
         UART["P9_24 TX / P9_26 RX<br/>UART1"]
         S1["P9_16 STEP1 / P9_18 DIR1"]
         S2["P9_12 STEP2 / P9_30 DIR2"]
-        E["P9_14 / P9_22<br/>endstops (planned)"]
+        E["P9_14 / P9_22<br/>endstops"]
         P["P9_3 3.3 V / P9_1, P9_2 GND"]
     end
 
@@ -59,8 +59,8 @@ flowchart LR
 | P9_30 | GPIO3_16 | driver 2: DIR | |
 | P9_24 | UART1_TX | 1 kΩ resistor, then PDN_UART of both drivers | one resistor for both |
 | P9_26 | UART1_RX | PDN_UART of both drivers, directly | |
-| P9_14 | GPIO1_18 | endstop 1 (motor 1) | **planned, not configured yet** |
-| P9_22 | GPIO0_2 | endstop 2 (motor 2) | **planned, not configured yet** |
+| P9_14 | GPIO1_18 | endstop 1 (motor 1) | input, internal pull-up |
+| P9_22 | GPIO0_2 | endstop 2 (motor 2) | input, internal pull-up |
 | P9_43..P9_46 | GND | endstop common | any BBB GND works |
 | P9_28 | (HDMI audio) | **nothing** | stuck at ~3.3 V on this board, never use |
 
@@ -168,17 +168,17 @@ flowchart LR
     BBB --- ES["Endstop commons"]
 ```
 
-## Endstops (planned)
+## Endstops
 
-**Not in the software yet.** Neither the device tree nor `tmc2209ctl` sets up
-P9_14 or P9_22, so wiring them now does nothing until that is added.
+The device tree muxes P9_14 and P9_22 as GPIO inputs with the internal
+pull-up. `tmc2209ctl` does not read them yet (homing is a later step).
 
 | Endstop | BBB pin | GPIO | Other side |
 |---|---|---|---|
 | Motor 1 | P9_14 | GPIO1_18 (gpio 50) | GND (P9_43..P9_46) |
 | Motor 2 | P9_22 | GPIO0_2 (gpio 2) | GND (P9_43..P9_46) |
 
-Planned wiring: a mechanical switch between the pin and GND, using the
+Wiring: a mechanical switch between the pin and GND, using the
 internal pull-up (pin reads 1 when open, 0 when pressed). Use the switch's
 COM and NO contacts. For NC (safer: a broken wire reads as "triggered"), use
 COM and NC instead and invert the logic in software.
@@ -191,8 +191,12 @@ P9_22 GPIO0_2  o────────o/ o────────o P9_46 GND 
 Rules: BBB inputs are 3.3 V only. Do not use a 3-wire endstop board powered
 from 5 V or 12 V (common on 3D-printer kits) unless its signal is 3.3 V.
 
-Still to do in software: mux both pins as GPIO inputs with pull-up (mode 7) in
-the device tree, and read them in `tmc2209ctl` for homing.
+Check a switch from the BBB shell (libgpiod tools are in the image):
+
+```
+gpioget "P9_14 [ehrpwm1a]"     # motor 1: 1 = open, 0 = pressed
+gpioget "P9_22 [spi0_sclk]"    # motor 2
+```
 
 ## Why STEP 2 is on P9_12 and not P9_28
 

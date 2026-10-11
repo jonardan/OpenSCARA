@@ -175,7 +175,8 @@ P9 pins that do NOT work for STEP/DIR (for future changes)
   P9_24/26             UART1 (the TMC bus)
   P9_25/28/29/31       HDMI audio (P9_28 also stuck high on our board)
   P9_41/42             each wired to two processor pins - avoid
-  Still free: P9_11, 13, 14, 15, 17, 21, 22, 23, 27
+  Endstops:   P9_14 (motor 1), P9_22 (motor 2)
+  Still free: P9_11, 13, 15, 17, 21, 23, 27
 
 Using it
 --------
