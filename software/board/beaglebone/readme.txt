@@ -195,6 +195,8 @@ Using it
 
   tmc2209ctl endstop              # each switch: released or pressed
   tmc2209ctl endstop watch        # print every change until Ctrl-C
+  tmc2209ctl home                 # home motor 2 (elbow), then motor 1
+  tmc2209ctl home 2               # home only motor 2
 
   tmc2209ctl -m all run 200       # both spin continuously (hardware-timed)
   tmc2209ctl -m 2 run -60         # change only motor 2's speed/direction
@@ -214,6 +216,26 @@ Using it
   Separate commands for different motors can also run at the same time
   (e.g. one in the background with &); the shared UART is locked so they
   don't collide.
+
+Homing
+------
+  "home" turns each joint toward its switch at home_rpm, backs off 5
+  degrees, comes back at home_rpm / 5 and stops on the click. It gives up
+  with an error after one joint revolution (switch unplugged or broken),
+  and moves off the switch first if it is already pressed. The result
+  goes to /run/scara.pos; disable, run, init or a reboot clear "homed".
+
+  First set home_dir for each motor in /etc/tmc2209.conf (homing refuses
+  while it is 0). Check it safely, one motor at a time, with a hand on
+  the 12V switch:
+
+    tmc2209ctl -m 2 turn 0.05 10    # small, slow move of the elbow
+    tmc2209ctl -m 2 turn -0.05 10   # and back
+
+  If the positive turn moved the joint toward its switch, home_dir = 1,
+  otherwise -1. Same with -m 1 for the shoulder. Then try "home 2" alone
+  with the joint well away from the switch; if it runs away from the
+  switch, cut the 12V and flip home_dir.
 
 Configuration: /etc/tmc2209.conf
 --------------------------------

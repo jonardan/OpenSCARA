@@ -7,7 +7,8 @@
  * Several drivers can share that UART, told apart by their MS1/MS2
  * address straps.  Exact-distance moves use STEP/DIR pulses on two GPIO
  * lines per motor; moves of several motors run together and finish
- * together.  Each motor's endstop switch is read from one more GPIO line.
+ * together.  Each motor's endstop switch is read from one more GPIO line,
+ * and "home" drives each joint onto its switch to find a known position.
  *
  * Defaults are read from /etc/tmc2209.conf ([motorN] sections hold the
  * per-motor settings) and can be overridden on the command line.  Run
@@ -37,6 +38,7 @@
 
 #define CONF_PATH	"/etc/tmc2209.conf"
 #define STATE_PATH	"/run/tmc2209.%d.vactual"	/* per UART address */
+#define POS_PATH	"/run/scara.pos"
 #define MAX_MOTORS	4
 
 /* TMC2209 registers */
@@ -88,6 +90,11 @@ struct config {
 	char dir_line[32];
 	char endstop_line[32];	/* empty: no endstop */
 	int endstop_nc;		/* switch wired COM/NC: line high when pressed */
+	int home_dir;		/* +1/-1: motor direction toward the switch */
+	double home_angle;	/* joint angle (deg) at the switch */
+	double home_rpm;	/* homing speed (motor rpm) */
+	int motor_teeth;	/* pulley teeth: joint turns motor_teeth/joint_teeth */
+	int joint_teeth;	/*   of a revolution per motor revolution */
 };
 
 static struct config cfg = {
@@ -104,6 +111,9 @@ static struct config cfg = {
 	.accel = 2,
 	.step_line = "P9_16 [ehrpwm1b]",
 	.dir_line = "P9_18 [spi0_d1]",
+	.home_rpm = 20,
+	.motor_teeth = 1,
+	.joint_teeth = 1,
 };
 
 /* cfg is the active motor: a copy of motors[cur] */
@@ -201,6 +211,16 @@ static int set_option(const char *key, const char *val)
 		snprintf(cfg.endstop_line, sizeof(cfg.endstop_line), "%s", val);
 	else if (!strcmp(key, "endstop_nc"))
 		cfg.endstop_nc = atoi(val);
+	else if (!strcmp(key, "home_dir"))
+		cfg.home_dir = atoi(val);
+	else if (!strcmp(key, "home_angle"))
+		cfg.home_angle = atof(val);
+	else if (!strcmp(key, "home_rpm"))
+		cfg.home_rpm = atof(val);
+	else if (!strcmp(key, "motor_teeth"))
+		cfg.motor_teeth = atoi(val);
+	else if (!strcmp(key, "joint_teeth"))
+		cfg.joint_teeth = atoi(val);
 	else
 		return -1;
 	return 0;
@@ -431,6 +451,73 @@ static int tmc_write(uint8_t reg, uint32_t val)
 }
 
 /* ------------------------------------------------------------------ */
+/* Position file                                                       */
+/* ------------------------------------------------------------------ */
+
+/*
+ * POS_PATH keeps each motor's position between commands: microsteps
+ * counted by STEP/DIR moves, positive = the direction of "turn 1", and
+ * whether it is homed (the count is then relative to the joint at 0 deg).
+ * One line per motor: "motorN POSITION HOMED".  It lives in /run, so a
+ * reboot clears it; so does anything that loses steps (disable, 'run',
+ * a driver reset).
+ */
+static long pos[MAX_MOTORS];
+static int homed[MAX_MOTORS];
+
+static void pos_load(void)
+{
+	char line[128];
+	FILE *f = fopen(POS_PATH, "r");
+
+	memset(pos, 0, sizeof(pos));
+	memset(homed, 0, sizeof(homed));
+	if (!f)
+		return;
+	while (fgets(line, sizeof(line), f)) {
+		long p;
+		int m, h;
+
+		if (sscanf(line, "motor%d %ld %d", &m, &p, &h) == 3 &&
+		    m >= 1 && m <= MAX_MOTORS) {
+			pos[m - 1] = p;
+			homed[m - 1] = !!h;
+		}
+	}
+	fclose(f);
+}
+
+static void pos_save(void)
+{
+	FILE *f = fopen(POS_PATH ".tmp", "w");
+
+	if (!f)
+		return;
+	fprintf(f, "# motor position (usteps) homed - written by tmc2209ctl\n");
+	for (int m = 0; m < nmotors; m++)
+		fprintf(f, "motor%d %ld %d\n", m + 1, pos[m], homed[m]);
+	fclose(f);
+	rename(POS_PATH ".tmp", POS_PATH);
+}
+
+static void pos_add(int m, long usteps)
+{
+	pos_load();
+	pos[m] += usteps;
+	pos_save();
+}
+
+/* The motor may have moved without us counting: position unknown */
+static void pos_lost(int m)
+{
+	pos_load();
+	if (homed[m]) {
+		homed[m] = 0;
+		pos_save();
+	}
+}
+
+/* ------------------------------------------------------------------ */
 /* Driver helpers                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -575,6 +662,7 @@ static int apply_config(void)
 		    tag(), (ifcnt1 - ifcnt0) & 0xFF, writes);
 		return -1;
 	}
+	pos_lost(cur);
 	printf("%sTMC2209 (addr %d) configured: %d usteps, %s, run %.0f mA, hold %.0f mA "
 	       "(motor off)\n", tag(), cfg.addr, cfg.microsteps,
 	       cfg.spreadcycle ? "spreadCycle" : "stealthChop",
@@ -722,6 +810,7 @@ static int cmd_run(double rpm)
 		if (ensure_ready() || get_microsteps(&usteps) || set_enabled(1))
 			return -1;
 		targets[k] = rpm_to_vactual(cfg.invert_dir ? -rpm : rpm, usteps);
+		pos_lost(cur);
 	}
 	if (ramp_motors(nsel, sel, targets))
 		return -1;
@@ -875,6 +964,27 @@ static void ts_add(struct timespec *t, double sec)
 	}
 }
 
+/* Pull-up input: a COM/NO switch pulls the line low when pressed */
+static int endstop_pressed(const struct config *c, int value)
+{
+	return !!value == !!c->endstop_nc;
+}
+
+/*
+ * Optional stop condition for move_axes(), and what happened.  With fd >= 0
+ * (an endstop line, single motor) the move stops as soon as the switch
+ * reads 'pressed' (1) or released (0) on ENDSTOP_READS checks in a row.
+ */
+#define ENDSTOP_READS	3
+
+struct until {
+	int fd;
+	int pressed;
+	int hit;		/* out: stopped on the switch */
+	int interrupted;	/* out: Ctrl-C */
+	long done;		/* out: usteps moved, signed */
+};
+
 struct axis {
 	int motor;
 	int sign;
@@ -889,15 +999,16 @@ struct axis {
  * revolutions (revs != 0) or microsteps for motor mi[k].  The motor with
  * the longest move runs at rpm with the acceleration ramp; the others are
  * spread over it (Bresenham), so all of them start and finish together.
+ * With u, the move can also stop on an endstop (see struct until).
  */
 static int move_axes(int count, const int *mi, const double *amount, int revs,
-		     double rpm)
+		     double rpm, struct until *u)
 {
 	struct sched_param sp = { .sched_priority = 50 };
 	struct axis ax[MAX_MOTORS], *m = NULL;
 	struct timespec next;
 	double vmax, a, v0;
-	int k, ret = -1;
+	int k, ret = -1, reads = 0;
 	long n;
 
 	if (rpm <= 0) {
@@ -907,6 +1018,8 @@ static int move_axes(int count, const int *mi, const double *amount, int revs,
 	memset(ax, 0, sizeof(ax));
 	for (k = 0; k < count; k++)
 		ax[k].step_fd = ax[k].dir_fd = -1;
+	if (u)
+		u->hit = u->interrupted = u->done = 0;
 
 	for (k = 0; k < count; k++) {
 		struct axis *x = &ax[k];
@@ -985,6 +1098,21 @@ static int move_axes(int count, const int *mi, const double *amount, int revs,
 			if (m->done + dec < n)
 				n = m->done + dec;
 			stop_req = 0;
+			if (u)
+				u->interrupted = 1;
+		}
+		if (u && u->fd >= 0) {
+			int val = get_line(u->fd);
+
+			if (val >= 0 && endstop_pressed(&motors[m->motor], val) ==
+			    u->pressed)
+				reads++;
+			else
+				reads = 0;
+			if (reads >= ENDSTOP_READS) {
+				u->hit = 1;
+				break;
+			}
 		}
 		for (k = 0; k < count; k++) {
 			struct axis *x = &ax[k];
@@ -1029,6 +1157,11 @@ out:
 			close(x->dir_fd);
 		if (ret || !x->n)
 			continue;
+		pos_add(x->motor, x->sign * x->done);
+		if (u) {
+			u->done = x->sign * x->done;
+			continue;
+		}
 		select_motor(x->motor);
 		printf("%smoved %ld usteps (%.3f rev)%s\n", tag(),
 		       x->sign * x->done, x->sign * x->done / x->upr,
@@ -1040,12 +1173,6 @@ out:
 /* ------------------------------------------------------------------ */
 /* Endstops                                                            */
 /* ------------------------------------------------------------------ */
-
-/* Pull-up input: a COM/NO switch pulls the line low when pressed */
-static int endstop_pressed(const struct config *c, int value)
-{
-	return !!value == !!c->endstop_nc;
-}
 
 static void print_endstop(int m, int value)
 {
@@ -1147,6 +1274,161 @@ out:
 		if (p[k].fd >= 0)
 			close(p[k].fd);
 	return ret;
+}
+
+/* ------------------------------------------------------------------ */
+/* Homing                                                              */
+/* ------------------------------------------------------------------ */
+
+#define HOME_CLEAR_DEG		90	/* max travel to get off a pressed switch */
+#define HOME_MAX_DEG		360	/* max travel to find the switch */
+#define HOME_BACKOFF_DEG	5	/* back off before the slow approach */
+#define HOME_SLOW_DIV		5	/* slow approach = home_rpm / this */
+
+/*
+ * Turn motor m's joint by deg (positive = toward the switch) at rpm,
+ * stopping early if u->fd says so.  Fails on Ctrl-C.
+ */
+static int home_move(int m, double deg, double rpm, struct until *u)
+{
+	const struct config *c = &motors[m];
+	double revs = deg / 360.0 * c->joint_teeth / c->motor_teeth *
+		      c->home_dir;
+
+	if (stop_req || move_axes(1, &m, &revs, 1, rpm, u))
+		return -1;
+	if (u->interrupted) {
+		err("motor %d: homing interrupted", m + 1);
+		return -1;
+	}
+	return 0;
+}
+
+static int home_one(int m)
+{
+	const struct config *c = &motors[m];
+	struct until u = { .fd = -1 };
+	double slow = c->home_rpm / HOME_SLOW_DIV;
+	int fd, usteps, v, ret = -1;
+
+	fd = request_input(c->endstop_line);
+	if (fd < 0)
+		return -1;
+	u.fd = fd;
+	pos_lost(m);
+	printf("motor %d: homing (home_dir %+d, %.0f rpm)\n", m + 1,
+	       c->home_dir, c->home_rpm);
+	fflush(stdout);
+
+	v = get_line(fd);
+	if (v >= 0 && endstop_pressed(c, v)) {
+		printf("motor %d: switch already pressed, moving off it\n", m + 1);
+		u.pressed = 0;
+		if (home_move(m, -HOME_CLEAR_DEG, c->home_rpm, &u))
+			goto out;
+		if (!u.hit) {
+			err("motor %d: switch still pressed after %d deg away "
+			    "from it; check its wiring and endstop_nc", m + 1,
+			    HOME_CLEAR_DEG);
+			goto out;
+		}
+	}
+
+	/* Fast approach */
+	u.pressed = 1;
+	if (home_move(m, HOME_MAX_DEG, c->home_rpm, &u))
+		goto out;
+	if (!u.hit) {
+		err("motor %d: switch not reached after %d deg of joint travel; "
+		    "is it unplugged or broken, or home_dir wrong?", m + 1,
+		    HOME_MAX_DEG);
+		goto out;
+	}
+
+	/* Back off, then slow approach for a repeatable click */
+	u.fd = -1;
+	if (home_move(m, -HOME_BACKOFF_DEG, c->home_rpm, &u))
+		goto out;
+	v = get_line(fd);
+	if (v < 0 || endstop_pressed(c, v)) {
+		err("motor %d: switch still pressed after backing off %d deg",
+		    m + 1, HOME_BACKOFF_DEG);
+		goto out;
+	}
+	u.fd = fd;
+	if (home_move(m, 2 * HOME_BACKOFF_DEG, slow, &u))
+		goto out;
+	if (!u.hit) {
+		err("motor %d: switch not reached again on the slow approach",
+		    m + 1);
+		goto out;
+	}
+
+	/* The joint is now at home_angle */
+	select_motor(m);
+	if (get_microsteps(&usteps))
+		goto out;
+	pos_load();
+	pos[m] = lround(c->home_angle * usteps_per_rev(usteps) *
+			c->joint_teeth / c->motor_teeth / 360.0);
+	homed[m] = 1;
+	pos_save();
+	printf("motor %d: homed, joint at %.1f deg\n", m + 1, c->home_angle);
+	ret = 0;
+out:
+	close(fd);
+	return ret;
+}
+
+/*
+ * home [1|2|all]: home the given motors (default all), the highest number
+ * first, so the elbow (motor 2) is folded onto its switch before the
+ * shoulder swings.  Stops at the first failure.
+ */
+static int cmd_home(int argc, char **argv)
+{
+	int mi[MAX_MOTORS], n = 0, k;
+
+	if (argc > 1 && strcmp(argv[1], "all") && strcmp(argv[1], "both")) {
+		int m = atoi(argv[1]);
+
+		if (m < 1 || m > nmotors) {
+			err("usage: home [1..%d|all]", nmotors);
+			return -1;
+		}
+		mi[n++] = m - 1;
+	} else {
+		for (k = nmotors - 1; k >= 0; k--)
+			mi[n++] = k;
+	}
+
+	/* Check every motor's settings before moving any of them */
+	for (k = 0; k < n; k++) {
+		const struct config *c = &motors[mi[k]];
+
+		if (!c->endstop_line[0]) {
+			err("motor %d: no endstop_line in %s", mi[k] + 1,
+			    CONF_PATH);
+			return -1;
+		}
+		if (c->home_dir != 1 && c->home_dir != -1) {
+			err("motor %d: set home_dir = 1 or -1 in [motor%d] of %s "
+			    "(the direction of 'turn' that goes toward the "
+			    "switch)", mi[k] + 1, mi[k] + 1, CONF_PATH);
+			return -1;
+		}
+		if (c->motor_teeth <= 0 || c->joint_teeth <= 0 ||
+		    c->home_rpm <= 0) {
+			err("motor %d: motor_teeth, joint_teeth and home_rpm "
+			    "must be > 0", mi[k] + 1);
+			return -1;
+		}
+	}
+	stop_req = 0;
+	for (k = 0; k < n; k++)
+		if (home_one(mi[k]))
+			return -1;
+	return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1268,6 +1550,8 @@ static void usage(void)
 "Endstops (every motor, -m is ignored):\n"
 "  endstop               print each switch: released or pressed\n"
 "  endstop watch         print every change until Ctrl-C\n"
+"  home [1|2|all]        drive each joint onto its switch (default all,\n"
+"                        motor 2 first); needs home_dir in the config\n"
 "\n"
 "Other:\n"
 "  read REG              read a register (name like CHOPCONF or number)\n"
@@ -1346,6 +1630,7 @@ static int run_one(int argc, char **argv)
 			return -1;
 		if (set_enabled(0))
 			return -1;
+		pos_lost(cur);
 		printf("%smotor released\n", tag());
 		return 0;
 	}
@@ -1375,6 +1660,7 @@ static int run_one(int argc, char **argv)
 		chop = (chop & ~CHOP_MRES_MASK) | (uint32_t)m << CHOP_MRES_SHIFT;
 		if (tmc_write(REG_CHOPCONF, chop))
 			return -1;
+		pos_lost(cur);
 		printf("%smicrosteps = %d\n", tag(), 256 >> m);
 		return 0;
 	}
@@ -1459,7 +1745,8 @@ static int run_cmd(int argc, char **argv)
 			return -1;
 		for (k = 0; k < nsel; k++)
 			amount[k] = atof(argv[1]);
-		return move_axes(nsel, sel, amount, !strcmp(c, "turn"), rpm);
+		return move_axes(nsel, sel, amount, !strcmp(c, "turn"), rpm,
+				 NULL);
 	}
 	if (!strcmp(c, "sync")) {
 		static const int both[2] = { 0, 1 };
@@ -1473,7 +1760,7 @@ static int run_cmd(int argc, char **argv)
 			return -1;
 		amount[0] = atof(argv[1]);
 		amount[1] = atof(argv[2]);
-		return move_axes(2, both, amount, 1, rpm);
+		return move_axes(2, both, amount, 1, rpm, NULL);
 	}
 	if (!strcmp(c, "run")) {
 		if (!need(argc, 2, "run RPM"))
@@ -1484,6 +1771,8 @@ static int run_cmd(int argc, char **argv)
 		return cmd_stop();
 	if (!strcmp(c, "endstop"))
 		return cmd_endstop(argc, argv);
+	if (!strcmp(c, "home"))
+		return cmd_home(argc, argv);
 
 	/* Everything else: once per selected motor, carry on past failures */
 	for (k = 0; k < nsel; k++) {
