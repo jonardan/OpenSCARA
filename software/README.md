@@ -250,7 +250,7 @@ instead: each line is checked from where the arm is, run, and answered `ok`
 (or `error`), so a PC-side sender can feed a drawing over the console.
 In a file, consecutive G1 lines that bend by at most `corner_deg` run as one
 `move_path`, so curves made of short segments don't stop at every join. A
-sample square and a circle of G1 segments are installed in
+sample square and a spiral of G1 segments are installed in
 `/usr/share/scara/`.
 
 ## Why STEP 2 is on P9_12 and not P9_28
