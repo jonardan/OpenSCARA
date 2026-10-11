@@ -108,6 +108,7 @@ const char *kin_strerror(enum kin_result r)
 	case KIN_TOO_FAR: return "out of reach (too far from the shoulder)";
 	case KIN_TOO_CLOSE: return "out of reach (too close to the shoulder)";
 	case KIN_LIMITS: return "reachable only outside the joint limits";
+	case KIN_JUMP: return "the line passes too close to the shoulder";
 	}
 	return "unknown error";
 }

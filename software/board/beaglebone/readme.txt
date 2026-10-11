@@ -313,6 +313,31 @@ Moving to X/Y: scara goto
   with + and -: a home_angle is off (shoulder: turned; elbow: + and -
   disagree).
 
+Straight lines: scara line
+--------------------------
+  scara line X Y [F] moves the tip from where it is to X/Y (mm) in a
+  straight line at F mm/s (default line_speed in the config, 20). goto
+  moves the joints, so the tip follows a curve; line splits the path into
+  1 mm segments and streams them through one stepping loop, accelerating
+  only at the start and the end (line_accel, mm/s^2). The elbow stays on
+  the side it is on; every point is checked before moving, and a line
+  that would leave the reach or the limits, or pass too close to the
+  shoulder, is refused with the first bad point. If a motor would go over
+  its rpm the whole line runs slower ("speed lowered to ...").
+
+  Drawing the 100 mm square with straight edges:
+
+  scara home
+  scara goto 150 -50 +
+  scara line 250 -50
+  scara line 250 50
+  scara line 150 50
+  scara line 150 -50
+
+  The edges should be straight (put a ruler on them) and the arm should
+  not stutter halfway. Speed check: scara line 150 -150 then
+  time "scara line 150 150 10": 300 mm at 10 mm/s is about 30 s.
+
 Configuration: /etc/tmc2209.conf
 --------------------------------
   Keys at the top apply to every motor (current, microsteps, speed, ...);

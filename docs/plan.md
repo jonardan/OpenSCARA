@@ -173,6 +173,10 @@ Test: draw a 100 mm square with a pen; edges are straight and the arm does
 not stutter at segment joins. Check the speed with a stopwatch over a long
 line.
 
+Done: `scara line X Y [F]` (F in mm/s, default `line_speed`; tip
+acceleration `line_accel`), with the square and the stopwatch check in
+the board readme.
+
 ### 8. Tip LED: `scara led on|off`
 
 Add `led_line` to the device tree (output, pulled down so the LED is off

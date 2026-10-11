@@ -5,3 +5,4 @@
 /software/package/tmc2209ctl/src/tmc2209ctl
 /software/package/tmc2209ctl/src/scara
 /software/package/tmc2209ctl/src/test_kinematics
+/software/package/tmc2209ctl/src/test_line

@@ -45,6 +45,8 @@ struct config cfg = {
 	.home_rpm = 20,
 	.motor_teeth = 1,
 	.joint_teeth = 1,
+	.line_speed = 20,
+	.line_accel = 100,
 };
 
 /* cfg is the active motor: a copy of motors[cur] */
@@ -156,6 +158,10 @@ static int set_option(const char *key, const char *val)
 		cfg.link1_mm = atof(val);
 	else if (!strcmp(key, "link2_mm"))
 		cfg.link2_mm = atof(val);
+	else if (!strcmp(key, "line_speed"))
+		cfg.line_speed = atof(val);
+	else if (!strcmp(key, "line_accel"))
+		cfg.line_accel = atof(val);
 	else
 		return -1;
 	return 0;
@@ -912,9 +918,104 @@ struct axis {
 	int sign;
 	long n, done, err;
 	int step_fd, dir_fd;
+	int invert_dir;
+	uint32_t chop;
 	double upr;		/* usteps per revolution */
 	double accel;		/* usteps/s^2 */
 };
+
+/*
+ * Get motor m ready for STEP/DIR: enabled, VACTUAL 0 (or STEP is
+ * ignored), and its microstepping into x->upr.  Selects motor m.
+ */
+static int axis_prepare(struct axis *x, int m)
+{
+	select_motor(m);
+	x->motor = m;
+	x->invert_dir = cfg.invert_dir;
+	if (ensure_ready())
+		return -1;
+	if (load_vactual() && stop_one())
+		return -1;
+	if (tmc_read(REG_CHOPCONF, &x->chop))
+		return -1;
+	x->upr = usteps_per_rev(256 >>
+			((x->chop & CHOP_MRES_MASK) >> CHOP_MRES_SHIFT));
+	x->accel = cfg.accel * x->upr;
+	return 0;
+}
+
+/* Step on rising edges only, and take the STEP and DIR lines (DIR forward or not) */
+static int axis_lines(struct axis *x, int forward)
+{
+	uint32_t chop = x->chop;
+
+	select_motor(x->motor);
+	chop &= ~(CHOP_DEDGE | CHOP_TOFF_MASK);
+	chop |= CHOP_TOFF_ON;
+	if (tmc_write(REG_CHOPCONF, chop))
+		return -1;
+	x->dir_fd = request_line(cfg.dir_line, !!forward ^ !!x->invert_dir);
+	if (x->dir_fd < 0)
+		return -1;
+	x->step_fd = request_line(cfg.step_line, 0);
+	return x->step_fd < 0 ? -1 : 0;
+}
+
+static void axis_close(struct axis *x)
+{
+	if (x->step_fd >= 0)
+		close(x->step_fd);
+	if (x->dir_fd >= 0)
+		close(x->dir_fd);
+	x->step_fd = x->dir_fd = -1;
+}
+
+/* Real-time priority and locked memory for a stepping loop, and back */
+static void rt_enter(void)
+{
+	struct sched_param sp = { .sched_priority = 50 };
+
+	mlockall(MCL_CURRENT | MCL_FUTURE);
+	if (sched_setscheduler(0, SCHED_FIFO, &sp))
+		fprintf(stderr, "warning: no realtime priority, motion may "
+			"stutter\n");
+}
+
+static void rt_leave(void)
+{
+	struct sched_param sp = { .sched_priority = 0 };
+
+	sched_setscheduler(0, SCHED_OTHER, &sp);
+}
+
+/* Sleep until t, then pulse STEP on the axes with fire[k] set */
+static void fire_at(struct timespec *t, int count, struct axis *ax,
+		    const int *fire)
+{
+	int k;
+
+	clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, t, NULL);
+	for (k = 0; k < count; k++)
+		if (fire[k])
+			set_line(ax[k].step_fd, 1);
+	for (k = 0; k < count; k++)
+		if (fire[k])
+			set_line(ax[k].step_fd, 0);
+}
+
+/* Next pulse dt after t; if we fell far behind, don't burst to catch up */
+static void next_after(struct timespec *t, double dt)
+{
+	struct timespec now;
+
+	ts_add(t, dt);
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	if (now.tv_sec > t->tv_sec + 1 ||
+	    (now.tv_sec - t->tv_sec) * 1e9 + (now.tv_nsec - t->tv_nsec) >
+	    2e9 * dt)
+		*t = now;
+}
 
 /*
  * Exact move of several motors at once over STEP/DIR.  amount[k] is in
@@ -926,7 +1027,6 @@ struct axis {
 int move_axes(int count, const int *mi, const double *amount, int revs,
 		     double rpm, struct until *u)
 {
-	struct sched_param sp = { .sched_priority = 50 };
 	struct axis ax[MAX_MOTORS], *m = NULL;
 	struct timespec next;
 	double vmax, a, v0;
@@ -945,36 +1045,16 @@ int move_axes(int count, const int *mi, const double *amount, int revs,
 
 	for (k = 0; k < count; k++) {
 		struct axis *x = &ax[k];
-		uint32_t chop;
 		long steps;
 
-		select_motor(mi[k]);
-		x->motor = mi[k];
-		if (ensure_ready())
+		if (axis_prepare(x, mi[k]))
 			goto out;
-		/* VACTUAL must be 0 or STEP input is ignored */
-		if (load_vactual() && stop_one())
-			goto out;
-		if (tmc_read(REG_CHOPCONF, &chop))
-			goto out;
-		x->upr = usteps_per_rev(256 >>
-				((chop & CHOP_MRES_MASK) >> CHOP_MRES_SHIFT));
-		x->accel = cfg.accel * x->upr;
 		steps = lround(revs ? amount[k] * x->upr : amount[k]);
 		x->n = labs(steps);
 		x->sign = steps < 0 ? -1 : 1;
 		if (!x->n)
 			continue;
-		chop &= ~(CHOP_DEDGE | CHOP_TOFF_MASK);
-		chop |= CHOP_TOFF_ON;
-		if (tmc_write(REG_CHOPCONF, chop))
-			goto out;
-		x->dir_fd = request_line(cfg.dir_line,
-					 (steps > 0) ^ !!cfg.invert_dir);
-		if (x->dir_fd < 0)
-			goto out;
-		x->step_fd = request_line(cfg.step_line, 0);
-		if (x->step_fd < 0)
+		if (axis_lines(x, steps > 0))
 			goto out;
 		if (!m || x->n > m->n)
 			m = x;
@@ -997,11 +1077,7 @@ int move_axes(int count, const int *mi, const double *amount, int revs,
 	for (k = 0; k < count; k++)
 		ax[k].err = m->n / 2;
 
-	mlockall(MCL_CURRENT | MCL_FUTURE);
-	if (sched_setscheduler(0, SCHED_FIFO, &sp))
-		fprintf(stderr, "warning: no realtime priority, motion may "
-			"stutter\n");
-
+	rt_enter();
 	stop_req = 0;
 	n = m->n;
 	clock_gettime(CLOCK_MONOTONIC, &next);
@@ -1011,7 +1087,6 @@ int move_axes(int count, const int *mi, const double *amount, int revs,
 		double vd = sqrt(v0 * v0 + 2 * a * (n - m->done));
 		double v = fmin(vmax, fmin(va, vd));
 		int fire[MAX_MOTORS];
-		struct timespec now;
 
 		if (stop_req) {
 			/* Ctrl-C: decelerate to a stop instead of halting */
@@ -1048,35 +1123,19 @@ int move_axes(int count, const int *mi, const double *amount, int revs,
 				fire[k] = 1;
 			}
 		}
-		clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, NULL);
+		fire_at(&next, count, ax, fire);
 		for (k = 0; k < count; k++)
-			if (fire[k])
-				set_line(ax[k].step_fd, 1);
-		for (k = 0; k < count; k++)
-			if (fire[k]) {
-				set_line(ax[k].step_fd, 0);
-				ax[k].done++;
-			}
-		ts_add(&next, 1.0 / v);
-		/* If we fell far behind, don't burst to catch up */
-		clock_gettime(CLOCK_MONOTONIC, &now);
-		if (now.tv_sec > next.tv_sec + 1 ||
-		    (now.tv_sec - next.tv_sec) * 1e9 +
-		    (now.tv_nsec - next.tv_nsec) > 2e9 / v)
-			next = now;
+			ax[k].done += fire[k];
+		next_after(&next, 1.0 / v);
 	}
 
-	sp.sched_priority = 0;
-	sched_setscheduler(0, SCHED_OTHER, &sp);
+	rt_leave();
 	ret = 0;
 out:
 	for (k = 0; k < count; k++) {
 		struct axis *x = &ax[k];
 
-		if (x->step_fd >= 0)
-			close(x->step_fd);
-		if (x->dir_fd >= 0)
-			close(x->dir_fd);
+		axis_close(x);
 		if (ret || !x->n)
 			continue;
 		pos_add(x->motor, x->sign * x->done);
@@ -1088,6 +1147,144 @@ out:
 		printf("%smoved %ld usteps (%.3f rev)%s\n", tag(),
 		       x->sign * x->done, x->sign * x->done / x->upr,
 		       x->done < x->n ? " - interrupted" : "");
+	}
+	return ret;
+}
+
+/*
+ * Lowest speed (path units/s) a path may need so no motor goes over
+ * MAX_STEP_RATE or its own rpm on any segment.
+ */
+static double path_cap(int count, const struct axis *ax, int npts,
+		       const long *pts, double seg)
+{
+	double cap = INFINITY;
+	int i, k;
+
+	for (k = 0; k < count; k++) {
+		double rate = fmin(MAX_STEP_RATE,
+				   motors[ax[k].motor].rpm / 60.0 * ax[k].upr);
+
+		for (i = 1; i < npts; i++) {
+			long d = labs(pts[i * count + k] -
+				      pts[(i - 1) * count + k]);
+
+			if (d)
+				cap = fmin(cap, rate * seg / d);
+		}
+	}
+	return cap;
+}
+
+int move_path(int count, const int *mi, int npts, const long *pts,
+	      double seg, double *speed, double accel, int *interrupted)
+{
+	struct axis ax[MAX_MOTORS];
+	struct timespec next;
+	double v0, len, end;
+	int i, k, dir[MAX_MOTORS], ret = -1;
+
+	*interrupted = 0;
+	if (*speed <= 0 || accel <= 0 || seg <= 0 || npts < 2) {
+		err("path speed, acceleration and segment length must be > 0");
+		return -1;
+	}
+	memset(ax, 0, sizeof(ax));
+	for (k = 0; k < count; k++)
+		ax[k].step_fd = ax[k].dir_fd = -1;
+	for (k = 0; k < count; k++) {
+		if (axis_prepare(&ax[k], mi[k]))
+			goto out;
+		/* DIR of the first segment that moves this motor */
+		dir[k] = 1;
+		for (i = 1; i < npts; i++) {
+			long d = pts[i * count + k] - pts[(i - 1) * count + k];
+
+			if (d) {
+				dir[k] = d > 0 ? 1 : -1;
+				break;
+			}
+		}
+		if (axis_lines(&ax[k], dir[k] > 0))
+			goto out;
+	}
+	*speed = fmin(*speed, path_cap(count, ax, npts, pts, seg));
+
+	len = (npts - 1) * seg;
+	end = len;
+	v0 = fmin(*speed, sqrt(2 * accel * PATH_V0_DIST));
+
+	rt_enter();
+	stop_req = 0;
+	clock_gettime(CLOCK_MONOTONIC, &next);
+	ts_add(&next, 20e-6);	/* DIR setup time */
+	for (i = 1; i < npts; i++) {
+		long d[MAX_MOTORS], n = 0, j;
+		double s0 = (i - 1) * seg;
+
+		if (s0 >= end)
+			break;
+		for (k = 0; k < count; k++) {
+			d[k] = pts[i * count + k] - pts[(i - 1) * count + k];
+			ax[k].n = labs(d[k]);
+			if (ax[k].n > n)
+				n = ax[k].n;
+			if (d[k] && (d[k] > 0 ? 1 : -1) != dir[k]) {
+				dir[k] = -dir[k];
+				set_line(ax[k].dir_fd,
+					 (dir[k] > 0) ^ !!ax[k].invert_dir);
+				ts_add(&next, 20e-6);
+			}
+		}
+		if (!n) {
+			/* Neither motor moves on this segment: just wait */
+			double v = fmin(*speed, sqrt(v0 * v0 + 2 * accel * s0));
+
+			next_after(&next, seg / v);
+			continue;
+		}
+		for (k = 0; k < count; k++)
+			ax[k].err = n / 2;
+		for (j = 0; j < n; j++) {
+			double s = s0 + (j + 0.5) * seg / n;
+			double v = fmin(*speed,
+				   fmin(sqrt(v0 * v0 + 2 * accel * s),
+					sqrt(v0 * v0 + 2 * accel *
+					     fmax(0, end - s))));
+			int fire[MAX_MOTORS];
+
+			if (stop_req) {
+				/* Ctrl-C: decelerate along the path to a stop */
+				end = fmin(end, s + (v * v - v0 * v0) /
+					   (2 * accel));
+				stop_req = 0;
+				*interrupted = 1;
+			}
+			if (s >= end)
+				break;
+			for (k = 0; k < count; k++) {
+				struct axis *x = &ax[k];
+
+				fire[k] = 0;
+				x->err += x->n;
+				if (x->err >= n) {
+					x->err -= n;
+					fire[k] = 1;
+				}
+			}
+			fire_at(&next, count, ax, fire);
+			for (k = 0; k < count; k++)
+				ax[k].done += fire[k] * (d[k] < 0 ? -1 : 1);
+			next_after(&next, seg / n / v);
+		}
+	}
+	rt_leave();
+	ret = 0;
+out:
+	for (k = 0; k < count; k++) {
+		axis_close(&ax[k]);
+		if (!ret)
+			pos_add(ax[k].motor, ax[k].done);
 	}
 	return ret;
 }

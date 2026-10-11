@@ -235,6 +235,10 @@ hardware code and is tested on the PC with `make test` in
 `package/tmc2209ctl/src`. `scara fk A1 A2` and `scara ik X Y [+|-]` print the
 conversion without moving; `scara where` prints the tip X/Y once homed.
 `scara goto X Y [+|-]` moves the tip there (IK, then the `joint` move).
+`scara line X Y [F]` goes there in a straight line at F mm/s: `line.c`
+splits it into 1 mm segments with IK at each point (host-tested too), and
+`move_path` in `tmc2209.c` streams them through one stepping loop that
+accelerates only at the ends of the line.
 
 ## Why STEP 2 is on P9_12 and not P9_28
 

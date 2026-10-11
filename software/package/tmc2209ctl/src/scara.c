@@ -21,6 +21,7 @@
 #include <string.h>
 
 #include "kinematics.h"
+#include "line.h"
 #include "tmc2209.h"
 
 #define NJOINTS	2
@@ -46,12 +47,16 @@ static void usage(void)
 "                        fk and ik only compute, they don't move\n"
 "  goto X Y [+|-] [RPM]  move the tip to X/Y (mm): ik, then the joint\n"
 "                        move; needs homing\n"
+"  line X Y [F]          move the tip to X/Y (mm) in a straight line at F\n"
+"                        mm/s (default line_speed, %.0f); needs homing,\n"
+"                        and the elbow stays on the side it is on\n"
 "\n"
 "  Angles: shoulder from the +X axis, elbow from the line of link 1\n"
 "  (0 = straight), counter-clockwise positive seen from above.  X/Y in\n"
 "  mm from the shoulder axis; angles 0 0 = arm straight along +X.  RPM is\n"
 "  the speed of the motor that moves furthest (default %.0f).\n"
-"  Ctrl-C decelerates a move to a stop.\n", motors[0].rpm);
+"  Ctrl-C decelerates a move to a stop.\n", motors[0].line_speed,
+	motors[0].rpm);
 }
 
 /* Parse a number, rejecting trailing junk like "10x" */
@@ -298,6 +303,80 @@ static int cmd_goto(int argc, char **argv)
 	return move_to_angles(th, rpm);
 }
 
+/*
+ * line X Y [F]: the tip goes to X/Y in a straight line at F mm/s.  The
+ * line is split into ~1 mm segments (line.c) streamed through one
+ * stepping loop, so the tip neither curves nor stops at segment joins.
+ * Every point is checked before anything moves.
+ */
+static int cmd_line(int argc, char **argv)
+{
+	static const int both[NJOINTS] = { 0, 1 };
+	double x, y, x0, y0, now[NJOINTS], upd[NJOINTS], (*th)[NJOINTS];
+	double speed = motors[0].line_speed, asked, bx, by;
+	enum kin_result r;
+	struct arm a;
+	int i, j, npts, interrupted, ret = -1;
+	long *pts;
+
+	if (argc < 3 || argc > 4) {
+		err("usage: line X Y [F]");
+		return -1;
+	}
+	if (parse_num(argv[1], &x) || parse_num(argv[2], &y) ||
+	    (argc > 3 && parse_num(argv[3], &speed)) || get_arm(&a))
+		return -1;
+	if (speed <= 0) {
+		err("speed must be > 0 mm/s");
+		return -1;
+	}
+	if (get_angles(now)) {
+		err("the arm is not homed; run 'scara home'");
+		return -1;
+	}
+	for (j = 0; j < NJOINTS; j++) {
+		upd[j] = usteps_per_deg(j);
+		if (upd[j] <= 0)
+			return -1;
+	}
+	kin_forward(&a, now, &x0, &y0);
+	npts = line_npts(hypot(x - x0, y - y0), LINE_SEG_MM);
+	th = malloc(npts * sizeof(*th));
+	pts = malloc(npts * NJOINTS * sizeof(*pts));
+	if (!th || !pts) {
+		err("out of memory");
+		goto out;
+	}
+	r = line_plan(&a, now, x, y, npts, th, &bx, &by);
+	if (r != KIN_OK) {
+		err("line to %.2f, %.2f: at %.2f, %.2f: %s", x, y, bx, by,
+		    kin_strerror(r));
+		goto out;
+	}
+	/* Point 0 is exactly where the motors are */
+	for (j = 0; j < NJOINTS; j++)
+		pts[j] = pos[j];
+	for (i = 1; i < npts; i++)
+		for (j = 0; j < NJOINTS; j++)
+			pts[i * NJOINTS + j] = lround(th[i][j] * upd[j]);
+
+	asked = speed;
+	if (move_path(NJOINTS, both, npts, pts,
+		      hypot(x - x0, y - y0) / (npts - 1), &speed,
+		      motors[0].line_accel, &interrupted))
+		goto out;
+	if (speed < asked)
+		printf("speed lowered to %.1f mm/s: a motor would go over its "
+		       "rpm\n", speed);
+	if (interrupted)
+		printf("interrupted\n");
+	ret = cmd_where();
+out:
+	free(th);
+	free(pts);
+	return ret;
+}
+
 static int cmd_jog(int argc, char **argv)
 {
 	double deg, usteps, upd, rpm = motors[0].rpm;
@@ -385,6 +464,8 @@ int main(int argc, char **argv)
 		return cmd_ik(argc, argv) ? 1 : 0;
 	if (!strcmp(c, "goto"))
 		return cmd_goto(argc, argv) ? 1 : 0;
+	if (!strcmp(c, "line"))
+		return cmd_line(argc, argv) ? 1 : 0;
 	err("unknown command '%s' (try 'scara help')", c);
 	return 1;
 }
