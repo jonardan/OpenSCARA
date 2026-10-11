@@ -359,8 +359,10 @@ G-code: scara gcode
   scara gcode -n /usr/share/scara/square.gcode
   scara gcode /usr/share/scara/square.gcode
 
-  A circle, 50 mm radius around X200 Y0, as 72 G1 segments; the arm
-  stops briefly at each segment (no look-ahead across lines yet):
+  A circle, 50 mm radius around X200 Y0, as 72 G1 segments. In a file,
+  consecutive G1 lines at the same feed run as one path without slowing
+  down at the joins, as long as the direction turns by at most corner_deg
+  (15) degrees; sharper corners, like the square's, still stop:
 
   scara gcode /usr/share/scara/circle.gcode
 
@@ -368,7 +370,8 @@ G-code: scara gcode
   answer to each line before sending the next: every line is checked
   from where the arm is (reach, joint limits), run, then answered "ok".
   A bad line is answered "error" (the reason on stderr) and stops it;
-  so does Ctrl-C. Ctrl-D or M2 ends it. By hand:
+  so does Ctrl-C. Ctrl-D or M2 ends it. Streamed lines can't be joined
+  (the next one isn't there yet), so each G1 stops at its end. By hand:
 
   scara gcode -
   G28

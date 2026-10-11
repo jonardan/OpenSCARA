@@ -230,4 +230,7 @@ part (M3/M5, LED off on Ctrl-C) waits for step 8, see
 - `G2`/`G3` arcs (expanded into G1 segments).
 - LED brightness/colour with PWM (`M3 S`).
 - Continuous motion across G1 lines (look-ahead) for smoother curves.
+  Done for files: G1 lines turning by at most `corner_deg` run as one
+  path; sharper corners still stop. Next would be slowing down to a
+  corner speed instead of stopping, and look-ahead when streaming.
 - Other tip tools (pen lift on Z, servo).

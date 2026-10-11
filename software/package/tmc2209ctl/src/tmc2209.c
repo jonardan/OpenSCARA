@@ -47,6 +47,7 @@ struct config cfg = {
 	.joint_teeth = 1,
 	.line_speed = 20,
 	.line_accel = 100,
+	.corner_deg = 15,
 };
 
 /* cfg is the active motor: a copy of motors[cur] */
@@ -162,6 +163,8 @@ static int set_option(const char *key, const char *val)
 		cfg.line_speed = atof(val);
 	else if (!strcmp(key, "line_accel"))
 		cfg.line_accel = atof(val);
+	else if (!strcmp(key, "corner_deg"))
+		cfg.corner_deg = atof(val);
 	else
 		return -1;
 	return 0;
@@ -1156,7 +1159,7 @@ out:
  * MAX_STEP_RATE or its own rpm on any segment.
  */
 static double path_cap(int count, const struct axis *ax, int npts,
-		       const long *pts, double seg)
+		       const long *pts, const double *dist)
 {
 	double cap = INFINITY;
 	int i, k;
@@ -1170,23 +1173,24 @@ static double path_cap(int count, const struct axis *ax, int npts,
 				      pts[(i - 1) * count + k]);
 
 			if (d)
-				cap = fmin(cap, rate * seg / d);
+				cap = fmin(cap, rate * (dist[i] - dist[i - 1]) / d);
 		}
 	}
 	return cap;
 }
 
 int move_path(int count, const int *mi, int npts, const long *pts,
-	      double seg, double *speed, double accel, int *interrupted)
+	      const double *dist, double *speed, double accel,
+	      int *interrupted)
 {
 	struct axis ax[MAX_MOTORS];
 	struct timespec next;
-	double v0, len, end;
+	double v0, end;
 	int i, k, dir[MAX_MOTORS], ret = -1;
 
 	*interrupted = 0;
-	if (*speed <= 0 || accel <= 0 || seg <= 0 || npts < 2) {
-		err("path speed, acceleration and segment length must be > 0");
+	if (*speed <= 0 || accel <= 0 || npts < 2) {
+		err("path speed and acceleration must be > 0");
 		return -1;
 	}
 	memset(ax, 0, sizeof(ax));
@@ -1208,10 +1212,9 @@ int move_path(int count, const int *mi, int npts, const long *pts,
 		if (axis_lines(&ax[k], dir[k] > 0))
 			goto out;
 	}
-	*speed = fmin(*speed, path_cap(count, ax, npts, pts, seg));
+	*speed = fmin(*speed, path_cap(count, ax, npts, pts, dist));
 
-	len = (npts - 1) * seg;
-	end = len;
+	end = dist[npts - 1];
 	v0 = fmin(*speed, sqrt(2 * accel * PATH_V0_DIST));
 
 	rt_enter();
@@ -1220,7 +1223,7 @@ int move_path(int count, const int *mi, int npts, const long *pts,
 	ts_add(&next, 20e-6);	/* DIR setup time */
 	for (i = 1; i < npts; i++) {
 		long d[MAX_MOTORS], n = 0, j;
-		double s0 = (i - 1) * seg;
+		double s0 = dist[i - 1], seg = dist[i] - s0;
 
 		if (s0 >= end)
 			break;

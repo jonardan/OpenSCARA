@@ -247,7 +247,9 @@ with no hardware code, tested on the PC with `make test` like the math.
 `scara gcode FILE` checks every line and every move of the file, then runs
 G0 as `goto`, G1 as `line` and G28 as `home`. `scara gcode -` streams stdin
 instead: each line is checked from where the arm is, run, and answered `ok`
-(or `error`), so a PC-side sender can feed a drawing over the console. A
+(or `error`), so a PC-side sender can feed a drawing over the console.
+In a file, consecutive G1 lines that bend by at most `corner_deg` run as one
+`move_path`, so curves made of short segments don't stop at every join. A
 sample square and a circle of G1 segments are installed in
 `/usr/share/scara/`.
 
