@@ -15,7 +15,7 @@ Build
 
   Buildroot remembers the BR2_EXTERNAL path, so later builds are just make.
 
-  After editing only the program:  make tmc2209ctl-rebuild all
+  After editing only the programs: make tmc2209ctl-rebuild all
   After editing only the DTS:       make linux-rebuild all
 
 Result: output/images/sdcard.img
@@ -236,6 +236,43 @@ Homing
   otherwise -1. Same with -m 1 for the shoulder. Then try "home 2" alone
   with the joint well away from the switch; if it runs away from the
   switch, cut the 12V and flip home_dir.
+
+Joint angles: scara
+-------------------
+  "scara" works in joint angles (degrees) instead of motor turns. Joint 1
+  is the shoulder (motor 1), joint 2 the elbow (motor 2). The shoulder
+  angle is measured from the +X axis, the elbow from the line of link 1
+  (0 = arm straight), counter-clockwise positive seen from above.
+
+  scara home                      # home elbow, then shoulder
+  scara where                     # print both joint angles
+  scara joint 0 90                # shoulder to 0, elbow to 90 deg, together
+  scara jog 1 -10 10              # shoulder 10 deg clockwise at 10 rpm
+
+  "joint" needs both joints homed and refuses angles outside min_angle..
+  max_angle; "jog" ignores the limits (it is for measuring them).
+
+  Measuring home_angle and the limits (once, or after moving a switch).
+  Keep a hand on the 12V switch and jog slowly (the last number is rpm):
+
+  1. Direction: "scara jog 1 5 10" must turn link 1 counter-clockwise seen
+     from above, and "scara jog 2 5 10" link 2 counter-clockwise relative
+     to link 1. If one turns clockwise, set invert_dir = 1 in that motor's
+     section and flip its home_dir (1 <-> -1).
+  2. Tape a line on the table from the shoulder axis: that is +X.
+  3. scara home, then jog the shoulder (scara jog 1 DEG 10, in small
+     steps) until link 1 lies along the tape. scara where prints A1:
+     home_angle of [motor1] = -A1.
+  4. Jog the elbow until link 2 is straight in line with link 1. scara
+     where prints A2: home_angle of [motor2] = -A2.
+  5. Put both values in /etc/tmc2209.conf and run scara home again;
+     scara where now shows the real angles.
+  6. Limits: jog each joint slowly toward each side until it is a few
+     degrees from hitting something (cables, the other link, the frame),
+     read scara where, and keep a 5 degree margin: min_angle / max_angle.
+
+  /etc is on the SD card, so the values survive a reboot; copy them into
+  software/package/tmc2209ctl/tmc2209.conf so the next image has them.
 
 Configuration: /etc/tmc2209.conf
 --------------------------------

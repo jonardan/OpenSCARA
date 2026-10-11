@@ -20,9 +20,9 @@ the step that first needs them.
 | `microsteps` | TMC2209 microstepping | 16 | 4 |
 | `motor_teeth` (per motor) | GT2 teeth on the motor pulley | 20 / 20 | 4 |
 | `joint_teeth` (per motor) | GT2 teeth on the joint pulley | 72 (shoulder) / 45 (elbow) | 4 |
-| `home_angle` (per motor) | joint angle (deg) when its endstop clicks | measured in step 4 | 4 |
-| `home_dir` (per motor) | direction to turn to reach the endstop (+1/−1) | checked by hand in step 3 | 3 |
-| `min_angle`, `max_angle` (per motor) | safe joint range (deg) | measured in step 4 | 4 |
+| `home_angle` (per motor) | joint angle (deg) when its endstop clicks | 116.75 / 171 | 4 |
+| `home_dir` (per motor) | direction to turn to reach the endstop (+1/−1) | 1 / 1 | 3 |
+| `min_angle`, `max_angle` (per motor) | safe joint range (deg) | −109.25..111.75 / −171..166 | 4 |
 | `endstop_line`, `endstop_nc` (per motor) | GPIO line, normally-closed switch | P9_14 / P9_22, 0 | 2 |
 | `link1_mm` | shoulder axis to elbow axis | 195.4 | 5 |
 | `link2_mm` | elbow axis to tool tip | 166.4 | 5 |
