@@ -30,6 +30,7 @@ enum kin_result {
 	KIN_TOO_FAR,		/* r > l1 + l2 */
 	KIN_TOO_CLOSE,		/* r < |l1 - l2| */
 	KIN_LIMITS,		/* reachable, but not inside the joint limits */
+	KIN_JUMP,		/* line.c: a joint would jump between two points */
 };
 
 void kin_forward(const struct arm *a, const double th[2], double *x,
