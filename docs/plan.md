@@ -1,0 +1,196 @@
+# Plan: from endstops to G-code
+
+Goal: the OpenSCARA arm reads G-code and moves its tip to X/Y positions.
+First use: an LED on the tip, switched by M-codes, drawing in the air for
+long-exposure photos. Later the tip tool can change; G-code keeps that easy.
+
+Each step is small, ends with something to try on the BeagleBone, and is
+done in its own thread. Do them in order; a step only relies on the ones
+above it.
+
+## Arm parameters
+
+These live in `/etc/tmc2209.conf` (source: `software/package/tmc2209ctl/tmc2209.conf`),
+not in the code. Values marked TBD come from the user and are filled in by
+the step that first needs them.
+
+| Key | Meaning | Value | Needed from step |
+|---|---|---|---|
+| `steps_per_rev` | full steps per motor revolution | 200 | 4 |
+| `microsteps` | TMC2209 microstepping | 16 | 4 |
+| `motor_teeth` (per motor) | GT2 teeth on the motor pulley | TBD | 4 |
+| `joint_teeth` (per motor) | GT2 teeth on the joint pulley | TBD | 4 |
+| `home_angle` (per motor) | joint angle (deg) when its endstop clicks | TBD | 3 |
+| `home_dir` (per motor) | direction to turn to reach the endstop (+1/−1) | TBD | 3 |
+| `min_angle`, `max_angle` (per motor) | safe joint range (deg) | TBD | 4 |
+| `endstop_line`, `endstop_nc` (per motor) | GPIO line, normally-closed switch | P9_14 / P9_22, 0 | 2 |
+| `link1_mm` | shoulder axis to elbow axis | TBD | 6 |
+| `link2_mm` | elbow axis to tool tip | TBD | 6 |
+| `elbow_coupled` | 1 if motor 2 sits at the base and drives the elbow by a belt | TBD | 5 |
+| `led_line` | GPIO line for the tip LED | P9_23 (proposed) | 9 |
+
+Conventions (also go in `GLOSSARY.md` in step 4):
+
+- **Joint angle** θ1: shoulder, measured from the +X axis, counter-clockwise
+  positive. θ2: elbow, measured from the line of link 1 (0 = arm straight).
+- **Origin**: the shoulder axis is (0, 0). X/Y in mm.
+- **Home**: the pose where both endstops are pressed; after homing, joint
+  angles are known exactly.
+
+## Where the code goes
+
+`tmc2209ctl` stays the low-level tool (driver setup, raw motor moves) and
+gains the endstop and homing commands, since those are per-motor. Arm-level
+commands (angles, X/Y, G-code) go in a new program `scara` in the same
+package, so the driver code is shared rather than copied: step 4 first moves
+the UART/GPIO/move code out of `tmc2209ctl.c` into `tmc2209.c` + `tmc2209.h`,
+with no behaviour change. Pure math (IK, G-code parsing) goes in files that
+also build and run on the PC, so it gets host tests (`make test`) before it
+ever touches the arm.
+
+Position between separate commands is kept in `/run/scara.pos` (joint
+positions in microsteps, plus a "homed" flag). Disabling the motors or a
+reboot clears "homed"; arm-level moves refuse to run until homed.
+
+## Steps
+
+### 1. Endstop pins in the device tree
+
+Mux P9_14 (GPIO1_18) and P9_22 (GPIO0_2) as GPIO inputs with pull-up
+(mode 7) in `am335x-boneblack-tmc2209.dts`; update `software/README.md`
+(remove "planned").
+
+Test on the BBB: wire one switch, then
+`gpioget $(gpiofind "P9_14")` (or by chip/offset) prints 1 when released
+and 0 when pressed; same for P9_22. If libgpiod tools are not in the image,
+add `BR2_PACKAGE_LIBGPIOD_TOOLS`.
+
+### 2. `tmc2209ctl endstop`
+
+Read each motor's `endstop_line` (honouring `endstop_nc`) and print
+`motor1: open / pressed`. Add a `watch` form that prints changes until
+Ctrl-C.
+
+Test: press each switch by hand and see the right motor's line change.
+Swap the two wires in the config on purpose once to check the motor ↔
+switch mapping is what you think it is.
+
+### 3. Homing: `tmc2209ctl home`
+
+For each selected motor: turn toward the switch (`home_dir`) at a slow
+speed until it reads pressed, back off a few degrees, approach again at
+a slower speed, stop on the click. Give up with an error after a maximum
+travel (one joint revolution) so a broken switch can't wind the arm into
+its hard stop. Moving away first if the switch is already pressed.
+The stepping loop checks the endstop between pulses, so this needs a
+"move until" variant of `move_axes`. Writes `/run/scara.pos` with
+the joint at `home_angle`, homed = 1.
+
+Home motor 1 and motor 2 one at a time, in a safe order (decided with
+the user: usually the elbow first so the arm folds before the shoulder
+swings).
+
+Test: home from three different start poses; the arm stops at the same
+place each time (mark it with tape). Unplug a switch: homing stops with an
+error after the max travel.
+
+### 4. Joint angles: `scara joint A1 A2`
+
+Refactor first (driver code into `tmc2209.c/h`, no behaviour change; test
+`tmc2209ctl turn` still works). Then the new `scara` program:
+
+- microsteps per joint degree =
+  `steps_per_rev × microsteps × joint_teeth / motor_teeth / 360`
+- `scara joint A1 A2` moves both joints to absolute angles (deg) together,
+  using the synchronised move, refusing angles outside `min_angle..max_angle`
+  and refusing to move if not homed.
+- `scara where` prints the joint angles.
+
+Test: home, then `scara joint` to 0°, 90°, back; check with a protractor or
+a printed angle gauge. Do 20 back-and-forth moves and home again: the
+switch should click at the same count (no lost steps); `scara where` before
+re-homing shows how far off it was.
+
+### 5. Elbow belt coupling (only if motor 2 is at the base)
+
+If the elbow belt runs over the shoulder axis, turning the shoulder also
+turns the elbow relative to link 1. Correct for it in the joint → motor
+conversion: motor 2 position = θ2 + k·θ1 (k from the pulleys). Skip this
+step if motor 2 rides on the elbow.
+
+Test: move only θ1 by 90° with `scara joint`; link 2 must keep the same
+angle relative to link 1.
+
+### 6. Kinematics (host-tested)
+
+`kinematics.c`: forward (θ1, θ2 → x, y) and inverse (x, y → θ1, θ2) for
+the two-link arm, with an elbow side choice (left/right-handed; default
+the one that stays inside the joint limits), and "unreachable" for points
+outside `|L1 − L2| ≤ r ≤ L1 + L2` or outside the joint limits.
+
+Test on the PC: `make test` checks IK(FK(θ)) = θ over a grid of angles,
+known points (straight arm → (L1+L2, 0)), and unreachable points.
+
+### 7. Move to a point: `scara goto X Y`
+
+IK, then the joint move from step 4. `scara where` also prints x, y.
+
+Test: tape paper under the arm, mark the origin and axes; `goto` a few
+points (e.g. corners of a 100 mm square) with a pen or the LED, and
+measure the error with a ruler. Errors that grow with distance point to a
+wrong link length; rotated points point to a wrong `home_angle`.
+
+### 8. Straight lines: `scara line X Y [F mm/s]`
+
+A joint move from A to B traces a curve, not a line. Split the line into
+short segments (≈1 mm), IK each point, and stream them through one stepping
+loop at constant tip speed, accelerating only at the start and end of the
+whole line (no stop at every segment). This is what makes drawings look
+right in a long exposure.
+
+Test: draw a 100 mm square with a pen; edges are straight and the arm does
+not stutter at segment joins. Check the speed with a stopwatch over a long
+line.
+
+### 9. Tip LED: `scara led on|off`
+
+Add `led_line` to the device tree (output, pulled down so the LED is off
+at boot) and to the config. LED through a transistor if it draws more than
+a few mA (a BBB pin gives ~4–6 mA safely).
+
+Test: `scara led on/off` from the shell; the LED is off after a reboot.
+
+### 10. G-code parser (host-tested)
+
+`gcode.c`: parse one line into a command, separate from moving anything.
+First set:
+
+- `G0 X Y` rapid move (LED left as is), `G1 X Y F` straight line at feed F
+  (mm/min, G-code convention)
+- `G28` home
+- `G90` / `G91` absolute / relative, `G21` mm (only mm supported)
+- `M3` / `M5` LED on / off (spindle on/off, what most drawing tools emit);
+  `M106` / `M107` as aliases
+- `;` and `( )` comments, line numbers `N`, unknown codes → error with the
+  line number, Z ignored with a warning
+
+Test on the PC: `make test` with sample lines and a sample file.
+
+### 11. Run G-code: `scara gcode FILE` (or `-` for stdin)
+
+Execute the parsed commands with steps 3, 7, 8, 9. Before moving, check
+every point of the file is reachable and report the first one that isn't
+(line number) without moving. Print `ok` after each line so a PC-side
+sender can stream it over the USB console. Ctrl-C: LED off, decelerate,
+stop.
+
+Test: a square, a circle made of G1 segments, and a short text from a
+G-code generator (e.g. Inkscape's G-code export) with the LED; then a long
+exposure photo.
+
+## Later (not planned in detail)
+
+- `G2`/`G3` arcs (expanded into G1 segments).
+- LED brightness/colour with PWM (`M3 S`).
+- Continuous motion across G1 lines (look-ahead) for smoother curves.
+- Other tip tools (pen lift on Z, servo).
