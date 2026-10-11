@@ -10,7 +10,7 @@ Build
   This repo is a Buildroot BR2_EXTERNAL tree. Run make from the Buildroot
   source directory (~/Desktop/buildroot-2026.05.3):
 
-  make BR2_EXTERNAL=~/Desktop/robot-arm robotarm_defconfig   # once
+  make BR2_EXTERNAL=~/Desktop/robot-arm/software robotarm_defconfig   # once
   make
 
   Buildroot remembers the BR2_EXTERNAL path, so later builds are just make.
