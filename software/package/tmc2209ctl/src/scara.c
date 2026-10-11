@@ -34,6 +34,8 @@ static const char *const joint_name[NJOINTS] = { "shoulder", "elbow" };
 static int quiet;
 /* A move was stopped by Ctrl-C */
 static int stopped;
+/* 'gcode -': answer each line with ok instead of printing it */
+static int stream;
 
 static void usage(void)
 {
@@ -57,11 +59,12 @@ static void usage(void)
 "  line X Y [F]          move the tip to X/Y (mm) in a straight line at F\n"
 "                        mm/s (default line_speed, %.0f); needs homing,\n"
 "                        and the elbow stays on the side it is on\n"
-"  gcode [-n] FILE       run a G-code file (- for stdin): G0 X Y (goto),\n"
-"                        G1 X Y F (line, F in mm/min), G28 (home), G90 /\n"
-"                        G91, G21; M3/M5 and Z are ignored for now.\n"
-"                        Every line is checked before anything moves;\n"
-"                        -n only checks\n"
+"  gcode [-n] FILE       run a G-code file: G0 X Y (goto), G1 X Y F\n"
+"                        (line, F in mm/min), G28 (home), G90 / G91, G21;\n"
+"                        M3/M5 and Z are ignored for now.  Every line is\n"
+"                        checked before anything moves; -n only checks.\n"
+"                        FILE - streams stdin: each line is checked, run\n"
+"                        and answered ok (or error, and it stops)\n"
 "\n"
 "  Angles: shoulder from the +X axis, elbow from the line of link 1\n"
 "  (0 = straight), counter-clockwise positive seen from above.  X/Y in\n"
@@ -473,10 +476,10 @@ static void prog_free(struct prog *p)
 	free(p->l);
 }
 
-/* Read and parse the whole file ("-": stdin); -1 at the first bad line */
+/* Read and parse the whole file; -1 at the first bad line */
 static int prog_load(const char *name, struct prog *p)
 {
-	FILE *f = strcmp(name, "-") ? fopen(name, "r") : stdin;
+	FILE *f = fopen(name, "r");
 	char *buf = NULL, msg[128];
 	struct gc_state st;
 	size_t cap = 0;
@@ -484,7 +487,7 @@ static int prog_load(const char *name, struct prog *p)
 	int max = 0, ret = -1;
 
 	memset(p, 0, sizeof(*p));
-	p->name = f == stdin ? "stdin" : name;
+	p->name = name;
 	if (!f) {
 		err("%s: %s", name, strerror(errno));
 		return -1;
@@ -523,8 +526,7 @@ static int prog_load(const char *name, struct prog *p)
 	ret = 0;
 out:
 	free(buf);
-	if (f != stdin)
-		fclose(f);
+	fclose(f);
 	return ret;
 }
 
@@ -559,92 +561,179 @@ static enum kin_result plan_move(const struct arm *a, int motion, double x,
 	return r;
 }
 
+/* Where a run of the program is, carried from one line to the next */
+struct run {
+	const struct arm *a;
+	const char *name;
+	int dry;
+	double th[NJOINTS], x, y, speed;
+	int rel, is_homed, said_z, said_tool;
+};
+
+static void run_init(struct run *r, const struct arm *a, const char *name,
+		     int dry)
+{
+	memset(r, 0, sizeof(*r));
+	r->a = a;
+	r->name = name;
+	r->dry = dry;
+	r->speed = motors[0].line_speed;
+	r->is_homed = get_angles(r->th) == 0;
+	if (r->is_homed)
+		kin_forward(a, r->th, &r->x, &r->y);
+}
+
 /*
- * Run the program, or with dry only follow it on paper: every move is
- * planned from where the previous one left the joints, so the first
- * unreachable point is found before anything moves.  G0 is 'goto', G1 is
- * 'line', G28 is 'home'.  M3/M5 and Z are reported once, on the dry run.
+ * Run line n, or with r->dry only follow it on paper: the move is planned
+ * from where the previous one left the joints, so an unreachable point is
+ * found before anything moves.  G0 is 'goto', G1 is 'line', G28 is 'home'.
+ * M3/M5 and Z are reported once, on the dry run.  Returns 1 after M2/M30.
  */
-static int prog_run(const struct prog *p, const struct arm *a, int dry)
+static int run_line(struct run *r, const struct gc_line *l, const char *text,
+		    int n)
 {
 	static const int fold_first[NJOINTS] = { 1, 0 };
-	double th[NJOINTS], x = 0, y = 0, tx, ty, bx, by;
-	double speed = motors[0].line_speed;
-	int i, j, rel = 0, is_homed, said_z = 0, said_tool = 0;
-	enum kin_result r;
+	double tx, ty, bx, by;
+	enum kin_result k;
+	int j;
 
-	is_homed = get_angles(th) == 0;
-	if (is_homed)
-		kin_forward(a, th, &x, &y);
-	for (i = 0; i < p->n; i++) {
-		const struct gc_line *l = &p->l[i];
-		int n = i + 1;
-
-		if (stop_req || stopped) {
-			printf("stopped before line %d\n", n);
+	if (stop_req || stopped) {
+		printf("stopped before line %d\n", n);
+		return -1;
+	}
+	if (!r->dry && !stream && (l->dist || l->home || l->move ||
+				   l->has_f || l->end))
+		printf("%d: %s\n", n, text);
+	if (r->dry && l->has_z && !r->said_z++)
+		printf("%s:%d: Z ignored, the arm has no Z axis\n", r->name, n);
+	if (r->dry && l->tool && !r->said_tool++)
+		printf("%s:%d: M3/M5 ignored, the tip LED is not wired yet\n",
+		       r->name, n);
+	if (l->dist)
+		r->rel = l->dist == GC_REL;
+	if (l->home) {
+		if (r->dry) {
+			for (j = 0; j < NJOINTS; j++)
+				r->th[j] = motors[j].home_angle;
+		} else if (home_motors(NJOINTS, fold_first) ||
+			   get_angles(r->th)) {
+			err("%s:%d: homing failed", r->name, n);
 			return -1;
 		}
-		if (!dry && (l->dist || l->home || l->move || l->has_f ||
-			     l->end))
-			printf("%d: %s\n", n, p->text[i]);
-		if (dry && l->has_z && !said_z++)
-			printf("%s:%d: Z ignored, the arm has no Z axis\n",
-			       p->name, n);
-		if (dry && l->tool && !said_tool++)
-			printf("%s:%d: M3/M5 ignored, the tip LED is not "
-			       "wired yet\n", p->name, n);
-		if (l->dist)
-			rel = l->dist == GC_REL;
-		if (l->home) {
-			if (dry) {
-				for (j = 0; j < NJOINTS; j++)
-					th[j] = motors[j].home_angle;
-			} else if (home_motors(NJOINTS, fold_first) ||
-				   get_angles(th)) {
-				err("%s:%d: homing failed", p->name, n);
-				return -1;
-			}
-			is_homed = 1;
-			kin_forward(a, th, &x, &y);
+		r->is_homed = 1;
+		kin_forward(r->a, r->th, &r->x, &r->y);
+	}
+	if (l->has_f)
+		r->speed = l->f / 60;	/* mm/min to mm/s */
+	if (l->move) {
+		tx = l->has_x ? l->x + (r->rel ? r->x : 0) : r->x;
+		ty = l->has_y ? l->y + (r->rel ? r->y : 0) : r->y;
+		if (!r->is_homed) {
+			err("%s:%d: the arm is not homed; run 'scara home' or "
+			    "put G28 before the first move", r->name, n);
+			return -1;
 		}
-		if (l->has_f)
-			speed = l->f / 60;	/* mm/min to mm/s */
-		if (l->move) {
-			tx = l->has_x ? l->x + (rel ? x : 0) : x;
-			ty = l->has_y ? l->y + (rel ? y : 0) : y;
-			if (!is_homed) {
-				err("%s:%d: the arm is not homed; run 'scara "
-				    "home' or put G28 before the first move",
-				    p->name, n);
+		if (hypot(tx - r->x, ty - r->y) < MIN_MOVE_MM) {
+			;
+		} else if (r->dry) {
+			k = plan_move(r->a, l->motion, tx, ty, r->th, &bx, &by);
+			if (k != KIN_OK) {
+				err("%s:%d: %s: at %.2f, %.2f: %s", r->name, n,
+				    text, bx, by, kin_strerror(k));
 				return -1;
 			}
-			if (hypot(tx - x, ty - y) < MIN_MOVE_MM) {
-				;
-			} else if (dry) {
-				r = plan_move(a, l->motion, tx, ty, th, &bx,
-					      &by);
-				if (r != KIN_OK) {
-					err("%s:%d: %s: at %.2f, %.2f: %s",
-					    p->name, n, p->text[i], bx, by,
-					    kin_strerror(r));
-					return -1;
-				}
-			} else if (l->motion ? line_to(a, tx, ty, speed) :
-				   goto_xy(a, tx, ty, ELBOW_ANY,
-					   motors[0].rpm)) {
-				err("%s:%d: %s", p->name, n, p->text[i]);
-				return -1;
-			}
-			x = tx;
-			y = ty;
+		} else if (l->motion ? line_to(r->a, tx, ty, r->speed) :
+			   goto_xy(r->a, tx, ty, ELBOW_ANY, motors[0].rpm)) {
+			err("%s:%d: %s", r->name, n, text);
+			return -1;
+		} else if (get_angles(r->th)) {
+			return -1;
 		}
-		if (l->end)
+		r->x = tx;
+		r->y = ty;
+	}
+	return l->end ? 1 : 0;
+}
+
+/* Run (or with dry only check) every line of the program */
+static int prog_run(const struct prog *p, const struct arm *a, int dry)
+{
+	struct run r;
+	int i, ret;
+
+	run_init(&r, a, p->name, dry);
+	for (i = 0; i < p->n; i++) {
+		ret = run_line(&r, &p->l[i], p->text[i], i + 1);
+		if (ret < 0)
+			return -1;
+		if (ret)
 			break;
 	}
 	return 0;
 }
 
-/* gcode [-n] FILE: check the whole file, then run it */
+/*
+ * gcode [-n] -: run stdin one line at a time, for a sender that waits for
+ * the answer to each line before sending the next.  Each line is checked
+ * on paper from where the arm is, then run, then answered "ok" (or
+ * "error", and nothing more is read).
+ */
+static int stream_run(const struct arm *a, int dry)
+{
+	struct run r, check;
+	struct gc_state st;
+	struct gc_line l;
+	char *buf = NULL, msg[128];
+	size_t cap = 0;
+	ssize_t len;
+	int n = 0, ret = 0, end = 0;
+
+	gc_init(&st);
+	run_init(&r, a, "stdin", 0);
+	while (!end && (len = getline(&buf, &cap, stdin)) >= 0) {
+		n++;
+		while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r'))
+			buf[--len] = '\0';
+		if (gc_parse(&st, buf, &l, msg, sizeof(msg))) {
+			err("stdin:%d: %s", n, msg);
+			ret = -1;
+			break;
+		}
+		check = r;
+		check.dry = 1;
+		ret = run_line(&check, &l, buf, n);
+		r.said_z = check.said_z;
+		r.said_tool = check.said_tool;
+		if (ret >= 0 && !dry)
+			ret = run_line(&r, &l, buf, n);
+		if (dry)
+			r = check;
+		if (ret < 0)
+			break;
+		if (stop_req || stopped) {
+			printf("stopped at line %d\n", n);
+			ret = -1;
+			break;
+		}
+		end = ret;
+		ret = 0;
+		printf("ok\n");
+		fflush(stdout);
+	}
+	if (!end && !ret && (stop_req || stopped)) {
+		/* Ctrl-C while waiting for a line: getline gave up (EINTR) */
+		printf("stopped after line %d\n", n);
+		ret = -1;
+	}
+	if (ret) {
+		printf("error\n");
+		fflush(stdout);
+	}
+	free(buf);
+	return ret;
+}
+
+/* gcode [-n] FILE: check the whole file, then run it; "-": stream stdin */
 static int cmd_gcode(int argc, char **argv)
 {
 	int dry = argc > 1 && !strcmp(argv[1], "-n"), ret = -1;
@@ -655,7 +744,15 @@ static int cmd_gcode(int argc, char **argv)
 		err("usage: gcode [-n] FILE");
 		return -1;
 	}
-	if (get_arm(&a) || prog_load(argv[1 + dry], &p))
+	if (get_arm(&a))
+		return -1;
+	if (!strcmp(argv[1 + dry], "-")) {
+		stream = quiet = 1;
+		ret = stream_run(&a, dry);
+		stream = quiet = 0;
+		return ret ? ret : dry ? 0 : cmd_where();
+	}
+	if (prog_load(argv[1 + dry], &p))
 		goto out;
 	if (prog_run(&p, &a, 1))
 		goto out;

@@ -219,6 +219,12 @@ Test: a square, a circle made of G1 segments, and a short text from a
 G-code generator (e.g. Inkscape's G-code export) with the LED; then a long
 exposure photo.
 
+Done: the file form came with step 9. `scara gcode -` now streams: each
+line is checked from where the arm is, run, and answered `ok` (`error`
+stops it). `/usr/share/scara/circle.gcode` is the circle test. The LED
+part (M3/M5, LED off on Ctrl-C) waits for step 8, see
+`.scratch/inbox/issues/03-tip-led.md`.
+
 ## Later (not planned in detail)
 
 - `G2`/`G3` arcs (expanded into G1 segments).
