@@ -193,6 +193,9 @@ Using it
                                   #   the longer move runs at 90 rpm and
                                   #   both start and finish together
 
+  tmc2209ctl endstop              # each switch: released or pressed
+  tmc2209ctl endstop watch        # print every change until Ctrl-C
+
   tmc2209ctl -m all run 200       # both spin continuously (hardware-timed)
   tmc2209ctl -m 2 run -60         # change only motor 2's speed/direction
   tmc2209ctl -m all stop

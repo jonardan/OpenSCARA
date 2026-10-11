@@ -171,7 +171,8 @@ flowchart LR
 ## Endstops
 
 The device tree muxes P9_14 and P9_22 as GPIO inputs with the internal
-pull-up. `tmc2209ctl` does not read them yet (homing is a later step).
+pull-up. Each motor's switch is `endstop_line` in `tmc2209.conf`;
+`endstop_nc = 1` if it is wired COM/NC.
 
 | Endstop | BBB pin | GPIO | Other side |
 |---|---|---|---|
@@ -191,7 +192,14 @@ P9_22 GPIO0_2  o────────o/ o────────o P9_46 GND 
 Rules: BBB inputs are 3.3 V only. Do not use a 3-wire endstop board powered
 from 5 V or 12 V (common on 3D-printer kits) unless its signal is 3.3 V.
 
-Check a switch from the BBB shell (libgpiod tools are in the image):
+Check the switches from the BBB shell:
+
+```
+tmc2209ctl endstop          # motor 1: released (P9_14 [ehrpwm1a] = 1) ...
+tmc2209ctl endstop watch    # print every press/release until Ctrl-C
+```
+
+Or the raw lines with the libgpiod tools:
 
 ```
 gpioget $(gpiofind "P9_14 [ehrpwm1a]")    # motor 1: 1 = open, 0 = pressed

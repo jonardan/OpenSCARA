@@ -7,7 +7,7 @@
  * Several drivers can share that UART, told apart by their MS1/MS2
  * address straps.  Exact-distance moves use STEP/DIR pulses on two GPIO
  * lines per motor; moves of several motors run together and finish
- * together.
+ * together.  Each motor's endstop switch is read from one more GPIO line.
  *
  * Defaults are read from /etc/tmc2209.conf ([motorN] sections hold the
  * per-motor settings) and can be overridden on the command line.  Run
@@ -86,6 +86,8 @@ struct config {
 	double accel;		/* rev/s^2 */
 	char step_line[32];
 	char dir_line[32];
+	char endstop_line[32];	/* empty: no endstop */
+	int endstop_nc;		/* switch wired COM/NC: line high when pressed */
 };
 
 static struct config cfg = {
@@ -195,6 +197,10 @@ static int set_option(const char *key, const char *val)
 		snprintf(cfg.step_line, sizeof(cfg.step_line), "%s", val);
 	else if (!strcmp(key, "dir_line"))
 		snprintf(cfg.dir_line, sizeof(cfg.dir_line), "%s", val);
+	else if (!strcmp(key, "endstop_line"))
+		snprintf(cfg.endstop_line, sizeof(cfg.endstop_line), "%s", val);
+	else if (!strcmp(key, "endstop_nc"))
+		cfg.endstop_nc = atoi(val);
 	else
 		return -1;
 	return 0;
@@ -780,18 +786,25 @@ static int find_line(const char *name, char *chip, size_t len, int *offset)
 	return found;
 }
 
-static int request_line(const char *name, int value)
+/* Open the gpiochip holding line 'name'; its offset goes to *offset */
+static int open_chip_of(const char *name, int *offset)
 {
-	struct gpiohandle_request req;
 	char chip[300];
-	int offset, fd, r;
 
-	if (find_line(name, chip, sizeof(chip), &offset)) {
+	if (find_line(name, chip, sizeof(chip), offset)) {
 		err("GPIO line '%s' not found (is the tmc2209 device tree "
 		    "loaded?)", name);
 		return -1;
 	}
-	fd = open(chip, O_RDWR);
+	return open(chip, O_RDWR);
+}
+
+static int request_line(const char *name, int value)
+{
+	struct gpiohandle_request req;
+	int offset, fd, r;
+
+	fd = open_chip_of(name, &offset);
 	if (fd < 0)
 		return -1;
 	memset(&req, 0, sizeof(req));
@@ -814,6 +827,41 @@ static inline void set_line(int fd, int v)
 	struct gpiohandle_data d = { .values = { v } };
 
 	ioctl(fd, GPIOHANDLE_SET_LINE_VALUES_IOCTL, &d);
+}
+
+/*
+ * Input line that also reports both edges (read the events from the fd);
+ * the value can be read from it like from a line handle.
+ */
+static int request_input(const char *name)
+{
+	struct gpioevent_request req;
+	int offset, fd, r;
+
+	fd = open_chip_of(name, &offset);
+	if (fd < 0)
+		return -1;
+	memset(&req, 0, sizeof(req));
+	req.lineoffset = offset;
+	req.handleflags = GPIOHANDLE_REQUEST_INPUT;
+	req.eventflags = GPIOEVENT_REQUEST_BOTH_EDGES;
+	snprintf(req.consumer_label, sizeof(req.consumer_label), "tmc2209ctl");
+	r = ioctl(fd, GPIO_GET_LINEEVENT_IOCTL, &req);
+	close(fd);
+	if (r) {
+		err("cannot request GPIO '%s': %s", name, strerror(errno));
+		return -1;
+	}
+	return req.fd;
+}
+
+static int get_line(int fd)
+{
+	struct gpiohandle_data d;
+
+	if (ioctl(fd, GPIOHANDLE_GET_LINE_VALUES_IOCTL, &d))
+		return -1;
+	return d.values[0];
 }
 
 static void ts_add(struct timespec *t, double sec)
@@ -990,6 +1038,118 @@ out:
 }
 
 /* ------------------------------------------------------------------ */
+/* Endstops                                                            */
+/* ------------------------------------------------------------------ */
+
+/* Pull-up input: a COM/NO switch pulls the line low when pressed */
+static int endstop_pressed(const struct config *c, int value)
+{
+	return !!value == !!c->endstop_nc;
+}
+
+static void print_endstop(int m, int value)
+{
+	const struct config *c = &motors[m];
+
+	printf("motor %d: %-8s (%s = %d%s)\n", m + 1,
+	       endstop_pressed(c, value) ? "pressed" : "released",
+	       c->endstop_line, value, c->endstop_nc ? ", NC switch" : "");
+}
+
+/*
+ * Print the endstop of every motor that has one; with 'watch', keep
+ * printing each change until Ctrl-C.  A change is printed once the line
+ * has been quiet for DEBOUNCE_MS, so switch bounce shows up as one event.
+ */
+#define DEBOUNCE_MS	10
+
+static int cmd_endstop(int argc, char **argv)
+{
+	struct pollfd p[MAX_MOTORS];
+	int mi[MAX_MOTORS], last[MAX_MOTORS];
+	int watch = argc > 1 && !strcmp(argv[1], "watch");
+	int k, n = 0, ret = -1;
+
+	if (argc > 1 && !watch) {
+		err("usage: endstop [watch]");
+		return -1;
+	}
+	for (int m = 0; m < nmotors; m++) {
+		if (!motors[m].endstop_line[0]) {
+			printf("motor %d: no endstop_line in %s\n", m + 1,
+			       CONF_PATH);
+			continue;
+		}
+		p[n].fd = request_input(motors[m].endstop_line);
+		p[n].events = POLLIN;
+		if (p[n].fd < 0)
+			goto out;
+		last[n] = get_line(p[n].fd);
+		if (last[n] < 0) {
+			err("cannot read GPIO '%s': %s", motors[m].endstop_line,
+			    strerror(errno));
+			n++;
+			goto out;
+		}
+		mi[n] = m;
+		print_endstop(m, last[n]);
+		n++;
+	}
+	if (!n || !watch) {
+		ret = 0;
+		goto out;
+	}
+
+	puts("watching the endstops, Ctrl-C to stop");
+	fflush(stdout);
+	stop_req = 0;
+	while (!stop_req) {
+		int timeout = -1;
+
+		/* Wait for an edge, then until DEBOUNCE_MS pass without one */
+		for (;;) {
+			int r = poll(p, n, timeout);
+
+			if (r < 0 && errno == EINTR)
+				break;
+			if (r < 0) {
+				err("poll: %s", strerror(errno));
+				goto out;
+			}
+			if (!r)
+				break;
+			for (k = 0; k < n; k++) {
+				struct gpioevent_data ev;
+
+				if ((p[k].revents & POLLIN) &&
+				    read(p[k].fd, &ev, sizeof(ev)) < 0) {
+					err("reading GPIO events: %s",
+					    strerror(errno));
+					goto out;
+				}
+			}
+			timeout = DEBOUNCE_MS;
+		}
+		for (k = 0; k < n && !stop_req; k++) {
+			int v = get_line(p[k].fd);
+
+			if (v >= 0 && v != last[k]) {
+				last[k] = v;
+				print_endstop(mi[k], v);
+				fflush(stdout);
+			}
+		}
+	}
+	stop_req = 0;
+	ret = 0;
+out:
+	for (k = 0; k < n; k++)
+		if (p[k].fd >= 0)
+			close(p[k].fd);
+	return ret;
+}
+
+/* ------------------------------------------------------------------ */
 /* Status / raw register access                                        */
 /* ------------------------------------------------------------------ */
 
@@ -1105,6 +1265,10 @@ static void usage(void)
 "  stop                  ramp a 'run' down to zero\n"
 "  Ctrl-C decelerates a move/turn/sync to a stop.\n"
 "\n"
+"Endstops (every motor, -m is ignored):\n"
+"  endstop               print each switch: released or pressed\n"
+"  endstop watch         print every change until Ctrl-C\n"
+"\n"
 "Other:\n"
 "  read REG              read a register (name like CHOPCONF or number)\n"
 "  write REG VALUE       write a register\n"
@@ -1154,9 +1318,10 @@ static void cmd_motors(void)
 		const struct config *c = &motors[i];
 
 		printf("motor %d: addr %d (MS1=%s MS2=%s)  STEP '%s'  DIR '%s'  "
-		       "%d mA  %d usteps%s\n", i + 1, c->addr,
+		       "ENDSTOP '%s'%s  %d mA  %d usteps%s\n", i + 1, c->addr,
 		       c->addr & 1 ? "3.3V" : "GND", c->addr & 2 ? "3.3V" : "GND",
-		       c->step_line, c->dir_line, c->current_ma, c->microsteps,
+		       c->step_line, c->dir_line, c->endstop_line,
+		       c->endstop_nc ? " (NC)" : "", c->current_ma, c->microsteps,
 		       c->invert_dir ? "  inverted" : "");
 	}
 }
@@ -1317,6 +1482,8 @@ static int run_cmd(int argc, char **argv)
 	}
 	if (!strcmp(c, "stop"))
 		return cmd_stop();
+	if (!strcmp(c, "endstop"))
+		return cmd_endstop(argc, argv);
 
 	/* Everything else: once per selected motor, carry on past failures */
 	for (k = 0; k < nsel; k++) {
