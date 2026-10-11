@@ -194,8 +194,8 @@ from 5 V or 12 V (common on 3D-printer kits) unless its signal is 3.3 V.
 Check a switch from the BBB shell (libgpiod tools are in the image):
 
 ```
-gpioget "P9_14 [ehrpwm1a]"     # motor 1: 1 = open, 0 = pressed
-gpioget "P9_22 [spi0_sclk]"    # motor 2
+gpioget $(gpiofind "P9_14 [ehrpwm1a]")    # motor 1: 1 = open, 0 = pressed
+gpioget $(gpiofind "P9_22 [spi0_sclk]")   # motor 2
 ```
 
 ## Why STEP 2 is on P9_12 and not P9_28
