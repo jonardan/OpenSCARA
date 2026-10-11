@@ -20,9 +20,9 @@ the step that first needs them.
 | `microsteps` | TMC2209 microstepping | 16 | 4 |
 | `motor_teeth` (per motor) | GT2 teeth on the motor pulley | 20 / 20 | 4 |
 | `joint_teeth` (per motor) | GT2 teeth on the joint pulley | 72 (shoulder) / 45 (elbow) | 4 |
-| `home_angle` (per motor) | joint angle (deg) when its endstop clicks | TBD | 3 |
-| `home_dir` (per motor) | direction to turn to reach the endstop (+1/−1) | TBD | 3 |
-| `min_angle`, `max_angle` (per motor) | safe joint range (deg) | TBD | 4 |
+| `home_angle` (per motor) | joint angle (deg) when its endstop clicks | measured in step 4 | 4 |
+| `home_dir` (per motor) | direction to turn to reach the endstop (+1/−1) | checked by hand in step 3 | 3 |
+| `min_angle`, `max_angle` (per motor) | safe joint range (deg) | measured in step 4 | 4 |
 | `endstop_line`, `endstop_nc` (per motor) | GPIO line, normally-closed switch | P9_14 / P9_22, 0 | 2 |
 | `link1_mm` | shoulder axis to elbow axis | 195.4 | 5 |
 | `link2_mm` | elbow axis to tool tip | 166.4 | 5 |
@@ -92,7 +92,7 @@ its hard stop. If the switch is already pressed at the start, move away
 from it first.
 The stepping loop checks the endstop between pulses, so this needs a
 "move until" variant of `move_axes`. Writes `/run/scara.pos` with
-the joint at `home_angle`, homed = 1.
+the joint at `home_angle` (0 until it is measured in step 4), homed = 1.
 
 Home one motor at a time: motor 2 (elbow) first, then motor 1 (shoulder),
 so the arm is folded to a known pose before the shoulder swings.
@@ -112,6 +112,24 @@ Refactor first (driver code into `tmc2209.c/h`, no behaviour change; test
   using the synchronised move, refusing angles outside `min_angle..max_angle`
   and refusing to move if not homed.
 - `scara where` prints the joint angles.
+
+Measuring the angles (the user doesn't know them yet, so they are measured
+here rather than guessed):
+
+- `scara jog J DEG` turns joint J by DEG relative to where it is, ignoring
+  limits, and `scara where` prints the angle relative to home.
+- `home_dir`: run `tmc2209ctl -m N turn 0.1` and see which way the joint
+  moves; the direction that goes toward the switch is +1, otherwise −1.
+- Shoulder `home_angle`: home, then jog the shoulder until link 1 points
+  along the +X axis you chose (a line taped on the table). `home_angle` =
+  minus the angle jogged.
+- Elbow `home_angle`: home, then jog the elbow until link 2 lies straight in
+  line with link 1 (0°). `home_angle` = minus the angle jogged.
+- Limits: from home, jog each joint slowly toward each side until it is a
+  few degrees from hitting something (cables, the other link, the frame);
+  note the angle and keep a 5° margin.
+
+Write the values into `tmc2209.conf` and re-home.
 
 Test: home, then `scara joint` to 0°, 90°, back; check with a protractor or
 a printed angle gauge. Do 20 back-and-forth moves and home again: the
