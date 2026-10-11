@@ -13,6 +13,9 @@
  *   Motor 2 (UART address 2, MS1=GND MS2=3.3V)
  *     P9_12  GPIO1_28   STEP
  *     P9_30  GPIO3_16   DIR
+ *   Endstops (switch to GND, internal pull-up: 1 = open, 0 = pressed)
+ *     P9_14  GPIO1_18   motor 1
+ *     P9_22  GPIO0_2    motor 2
  *
  * STEP 2 was on P9_28 but that pin stays at ~3.3 V even when driven low
  * (measured 2026-10-09, shield removed), so it moved to P9_12. HDMI audio
@@ -25,7 +28,7 @@
 };
 
 &am33xx_pinmux {
-	pinctrl-0 = <&clkout2_pin &tmc2209_gpio_pins>;
+	pinctrl-0 = <&clkout2_pin &tmc2209_gpio_pins &endstop_pins>;
 
 	tmc2209_uart1_pins: tmc2209-uart1-pins {
 		pinctrl-single,pins = <
@@ -41,6 +44,14 @@
 			AM33XX_PADCONF(AM335X_PIN_SPI0_D1, PIN_OUTPUT_PULLDOWN, MUX_MODE7)	/* P9_18 DIR 1 */
 			AM33XX_PADCONF(AM335X_PIN_MCASP0_AXR0, PIN_OUTPUT_PULLDOWN, MUX_MODE7)	/* P9_30 DIR 2 */
 			AM33XX_PADCONF(AM335X_PIN_GPMC_BEN1, PIN_OUTPUT_PULLDOWN, MUX_MODE7)	/* P9_12 STEP 2 */
+		>;
+	};
+
+	/* Switch to GND: pull-up reads 1 when open, 0 when pressed */
+	endstop_pins: endstop-pins {
+		pinctrl-single,pins = <
+			AM33XX_PADCONF(AM335X_PIN_GPMC_A2, PIN_INPUT_PULLUP, MUX_MODE7)	/* P9_14 endstop 1 */
+			AM33XX_PADCONF(AM335X_PIN_SPI0_SCLK, PIN_INPUT_PULLUP, MUX_MODE7)	/* P9_22 endstop 2 */
 		>;
 	};
 };
