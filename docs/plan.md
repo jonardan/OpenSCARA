@@ -24,10 +24,13 @@ the step that first needs them.
 | `home_dir` (per motor) | direction to turn to reach the endstop (+1/−1) | TBD | 3 |
 | `min_angle`, `max_angle` (per motor) | safe joint range (deg) | TBD | 4 |
 | `endstop_line`, `endstop_nc` (per motor) | GPIO line, normally-closed switch | P9_14 / P9_22, 0 | 2 |
-| `link1_mm` | shoulder axis to elbow axis | TBD | 6 |
-| `link2_mm` | elbow axis to tool tip | TBD | 6 |
-| `elbow_coupled` | 1 if motor 2 sits at the base and drives the elbow by a belt | TBD | 5 |
-| `led_line` | GPIO line for the tip LED | P9_23 (proposed) | 9 |
+| `link1_mm` | shoulder axis to elbow axis | TBD | 5 |
+| `link2_mm` | elbow axis to tool tip | TBD | 5 |
+| `led_line` | GPIO line for the tip LED | P9_23 (proposed) | 8 |
+
+Mechanics: motor 1 sits on the base and turns link 1 (shoulder). Motor 2
+rides on link 1 and turns link 2 (elbow), so the elbow angle is relative to
+link 1 and needs no belt-coupling correction.
 
 Conventions (also go in `GLOSSARY.md` in step 4):
 
@@ -87,9 +90,8 @@ The stepping loop checks the endstop between pulses, so this needs a
 "move until" variant of `move_axes`. Writes `/run/scara.pos` with
 the joint at `home_angle`, homed = 1.
 
-Home motor 1 and motor 2 one at a time, in a safe order (decided with
-the user: usually the elbow first so the arm folds before the shoulder
-swings).
+Home one motor at a time: motor 2 (elbow) first, then motor 1 (shoulder),
+so the arm is folded to a known pose before the shoulder swings.
 
 Test: home from three different start poses; the arm stops at the same
 place each time (mark it with tape). Unplug a switch: homing stops with an
@@ -112,17 +114,7 @@ a printed angle gauge. Do 20 back-and-forth moves and home again: the
 switch should click at the same count (no lost steps); `scara where` before
 re-homing shows how far off it was.
 
-### 5. Elbow belt coupling (only if motor 2 is at the base)
-
-If the elbow belt runs over the shoulder axis, turning the shoulder also
-turns the elbow relative to link 1. Correct for it in the joint → motor
-conversion: motor 2 position = θ2 + k·θ1 (k from the pulleys). Skip this
-step if motor 2 rides on the elbow.
-
-Test: move only θ1 by 90° with `scara joint`; link 2 must keep the same
-angle relative to link 1.
-
-### 6. Kinematics (host-tested)
+### 5. Kinematics (host-tested)
 
 `kinematics.c`: forward (θ1, θ2 → x, y) and inverse (x, y → θ1, θ2) for
 the two-link arm, with an elbow side choice (left/right-handed; default
@@ -132,7 +124,7 @@ outside `|L1 − L2| ≤ r ≤ L1 + L2` or outside the joint limits.
 Test on the PC: `make test` checks IK(FK(θ)) = θ over a grid of angles,
 known points (straight arm → (L1+L2, 0)), and unreachable points.
 
-### 7. Move to a point: `scara goto X Y`
+### 6. Move to a point: `scara goto X Y`
 
 IK, then the joint move from step 4. `scara where` also prints x, y.
 
@@ -141,7 +133,7 @@ points (e.g. corners of a 100 mm square) with a pen or the LED, and
 measure the error with a ruler. Errors that grow with distance point to a
 wrong link length; rotated points point to a wrong `home_angle`.
 
-### 8. Straight lines: `scara line X Y [F mm/s]`
+### 7. Straight lines: `scara line X Y [F mm/s]`
 
 A joint move from A to B traces a curve, not a line. Split the line into
 short segments (≈1 mm), IK each point, and stream them through one stepping
@@ -153,7 +145,7 @@ Test: draw a 100 mm square with a pen; edges are straight and the arm does
 not stutter at segment joins. Check the speed with a stopwatch over a long
 line.
 
-### 9. Tip LED: `scara led on|off`
+### 8. Tip LED: `scara led on|off`
 
 Add `led_line` to the device tree (output, pulled down so the LED is off
 at boot) and to the config. LED through a transistor if it draws more than
@@ -161,7 +153,7 @@ a few mA (a BBB pin gives ~4–6 mA safely).
 
 Test: `scara led on/off` from the shell; the LED is off after a reboot.
 
-### 10. G-code parser (host-tested)
+### 9. G-code parser (host-tested)
 
 `gcode.c`: parse one line into a command, separate from moving anything.
 First set:
@@ -177,9 +169,9 @@ First set:
 
 Test on the PC: `make test` with sample lines and a sample file.
 
-### 11. Run G-code: `scara gcode FILE` (or `-` for stdin)
+### 10. Run G-code: `scara gcode FILE` (or `-` for stdin)
 
-Execute the parsed commands with steps 3, 7, 8, 9. Before moving, check
+Execute the parsed commands with steps 3, 6, 7, 8. Before moving, check
 every point of the file is reachable and report the first one that isn't
 (line number) without moving. Print `ok` after each line so a PC-side
 sender can stream it over the USB console. Ctrl-C: LED off, decelerate,
