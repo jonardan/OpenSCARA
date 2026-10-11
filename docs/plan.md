@@ -158,6 +158,9 @@ points (e.g. corners of a 100 mm square) with a pen or the LED, and
 measure the error with a ruler. Errors that grow with distance point to a
 wrong link length; rotated points point to a wrong `home_angle`.
 
+Done: `scara goto X Y [+|-] [RPM]`; the square check (sides and
+diagonals, no origin needed) is in the board readme.
+
 ### 7. Straight lines: `scara line X Y [F mm/s]`
 
 A joint move from A to B traces a curve, not a line. Split the line into

@@ -234,6 +234,7 @@ axis) and back, using `link1_mm` / `link2_mm` from `tmc2209.conf`. It has no
 hardware code and is tested on the PC with `make test` in
 `package/tmc2209ctl/src`. `scara fk A1 A2` and `scara ik X Y [+|-]` print the
 conversion without moving; `scara where` prints the tip X/Y once homed.
+`scara goto X Y [+|-]` moves the tip there (IK, then the `joint` move).
 
 ## Why STEP 2 is on P9_12 and not P9_28
 

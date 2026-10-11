@@ -291,6 +291,28 @@ X/Y: scara fk / ik
   the tip X/Y. The math is tested on the PC:
   make -C software/package/tmc2209ctl/src test
 
+Moving to X/Y: scara goto
+-------------------------
+  scara goto X Y [+|-] [RPM] does ik, then the same move as scara joint
+  (both joints together, needs homing, refuses points outside the limits).
+  Give + or - to keep the elbow on one side between moves.
+
+  Checking the arm with a 100 mm square: tape paper under the tip with a
+  pen (or the LED) on it, then
+
+  scara home
+  scara goto 150 -50 +            # mark the dot, then the next corner
+  scara goto 250 -50 +
+  scara goto 250 50 +
+  scara goto 150 50 +
+
+  Measure the four sides (100 mm) and both diagonals (141.4 mm); this
+  needs no origin on the paper. Sides too long or too short, more so on
+  the far edge (x 250) than the near one: link1_mm / link2_mm are off.
+  Right sizes but the square turned, or the same point landing elsewhere
+  with + and -: a home_angle is off (shoulder: turned; elbow: + and -
+  disagree).
+
 Configuration: /etc/tmc2209.conf
 --------------------------------
   Keys at the top apply to every motor (current, microsteps, speed, ...);
