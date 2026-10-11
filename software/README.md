@@ -227,6 +227,14 @@ need homing and stay inside `min_angle`..`max_angle` from `tmc2209.conf`.
 How to measure `home_angle` and the limits on the arm:
 `board/beaglebone/readme.txt`, "Joint angles: scara".
 
+## X/Y
+
+`kinematics.c` converts joint angles to the tip X/Y (mm, from the shoulder
+axis) and back, using `link1_mm` / `link2_mm` from `tmc2209.conf`. It has no
+hardware code and is tested on the PC with `make test` in
+`package/tmc2209ctl/src`. `scara fk A1 A2` and `scara ik X Y [+|-]` print the
+conversion without moving; `scara where` prints the tip X/Y once homed.
+
 ## Why STEP 2 is on P9_12 and not P9_28
 
 P9_28 is wired to the HDMI chip as an audio data line (McASP0 AXR2). Even with

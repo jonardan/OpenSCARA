@@ -274,6 +274,23 @@ Joint angles: scara
   /etc is on the SD card, so the values survive a reboot; copy them into
   software/package/tmc2209ctl/tmc2209.conf so the next image has them.
 
+X/Y: scara fk / ik
+------------------
+  X/Y are in mm from the shoulder axis; joint angles 0 0 put the tip at
+  (link1_mm + link2_mm, 0). Two commands only compute, nothing moves:
+
+  scara fk 0 90                   # tip X/Y for shoulder 0, elbow 90 deg
+  scara ik 200 100                # joint angles that put the tip there
+  scara ik 200 100 -              # same point with the elbow bent the other way
+
+  Most points have two solutions, mirror images: the elbow bent counter-
+  clockwise (+, elbow angle > 0) or clockwise (-). Without + or -, ik
+  takes one inside the joint limits, the closer to the current pose when
+  the arm is homed. Points too far, too close or only reachable outside
+  min_angle..max_angle are an error. After homing, scara where also prints
+  the tip X/Y. The math is tested on the PC:
+  make -C software/package/tmc2209ctl/src test
+
 Configuration: /etc/tmc2209.conf
 --------------------------------
   Keys at the top apply to every motor (current, microsteps, speed, ...);

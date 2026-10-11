@@ -152,6 +152,10 @@ static int set_option(const char *key, const char *val)
 		cfg.min_angle = atof(val);
 	else if (!strcmp(key, "max_angle"))
 		cfg.max_angle = atof(val);
+	else if (!strcmp(key, "link1_mm"))
+		cfg.link1_mm = atof(val);
+	else if (!strcmp(key, "link2_mm"))
+		cfg.link2_mm = atof(val);
 	else
 		return -1;
 	return 0;
