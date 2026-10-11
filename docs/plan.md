@@ -201,6 +201,12 @@ First set:
 
 Test on the PC: `make test` with sample lines and a sample file.
 
+Done, with part of step 10 pulled in: `scara gcode [-n] FILE` checks the
+whole file (syntax, then every move planned from the previous one, first
+unreachable point with its line number), then runs it with `goto`, `line`
+and `home`. M3/M5 are parsed but ignored with a warning until step 8 (LED)
+is done; see `.scratch/inbox/issues/03-tip-led.md`.
+
 ### 10. Run G-code: `scara gcode FILE` (or `-` for stdin)
 
 Execute the parsed commands with steps 3, 6, 7, 8. Before moving, check
