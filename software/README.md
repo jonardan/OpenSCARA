@@ -240,6 +240,14 @@ splits it into 1 mm segments with IK at each point (host-tested too), and
 `move_path` in `tmc2209.c` streams them through one stepping loop that
 accelerates only at the ends of the line.
 
+## G-code
+
+`gcode.c` parses one G-code line (G0, G1, G28, G90/G91, G21, M3/M5, comments)
+with no hardware code, tested on the PC with `make test` like the math.
+`scara gcode FILE` checks every line and every move of the file, then runs
+G0 as `goto`, G1 as `line` and G28 as `home`. A sample square is installed
+as `/usr/share/scara/square.gcode`.
+
 ## Why STEP 2 is on P9_12 and not P9_28
 
 P9_28 is wired to the HDMI chip as an audio data line (McASP0 AXR2). Even with

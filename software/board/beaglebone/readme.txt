@@ -338,6 +338,27 @@ Straight lines: scara line
   not stutter halfway. Speed check: scara line 150 -150 then
   time "scara line 150 150 10": 300 mm at 10 mm/s is about 30 s.
 
+G-code: scara gcode
+-------------------
+  scara gcode FILE runs a G-code file (- reads stdin until Ctrl-D):
+  G0 X Y is goto, G1 X Y F is line (F in mm/min, kept for the next
+  lines; default line_speed), G28 homes, G90 / G91 absolute / relative,
+  G21 mm. A line with only X/Y repeats the last G0/G1. Comments ; and
+  ( ), N line numbers and % are skipped. M3/M5 (M106/M107) and Z are
+  accepted and ignored with a warning (no tip LED yet); anything else,
+  like G2 arcs or G20 inches, stops with the line number.
+
+  The whole file is checked first: a syntax error or a point out of reach
+  is reported with its line, and nothing moves. scara gcode -n FILE only
+  checks. Each line is printed as it runs; Ctrl-C stops the move and the
+  file. After G28 the arm is folded, so the first move should be a G0: a
+  G1 straight out of the home pose leaves the joint limits.
+
+  The square again, from a file installed on the image:
+
+  scara gcode -n /usr/share/scara/square.gcode
+  scara gcode /usr/share/scara/square.gcode
+
 Configuration: /etc/tmc2209.conf
 --------------------------------
   Keys at the top apply to every motor (current, microsteps, speed, ...);
