@@ -380,6 +380,10 @@ G-code: scara gcode
   G1 X200 Y80 F600            -> line at 10 mm/s, then ok
   G1 X500                     -> error: out of reach, nothing moves
 
+  Drawings: docs/drawing.md turns an SVG into G-code
+  (tools/svg2gcode.py) and copies it here over this USB cable
+  (tools/bbb_send.py).
+
 Configuration: /etc/tmc2209.conf
 --------------------------------
   Keys at the top apply to every motor (current, microsteps, speed, ...);
