@@ -221,7 +221,7 @@ exposure photo.
 
 Done: the file form came with step 9. `scara gcode -` now streams: each
 line is checked from where the arm is, run, and answered `ok` (`error`
-stops it). `/usr/share/scara/circle.gcode` is the circle test. The LED
+stops it). `/usr/share/scara/spiral.gcode` (G1 segments) replaces the circle test. The LED
 part (M3/M5, LED off on Ctrl-C) waits for step 8, see
 `.scratch/inbox/issues/03-tip-led.md`.
 

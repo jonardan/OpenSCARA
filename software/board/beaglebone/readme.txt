@@ -359,12 +359,13 @@ G-code: scara gcode
   scara gcode -n /usr/share/scara/square.gcode
   scara gcode /usr/share/scara/square.gcode
 
-  A circle, 50 mm radius around X200 Y0, as 72 G1 segments. In a file,
+  A spiral around X200 Y0, 5 to 80 mm radius in 5 turns, as 360 G1
+  segments (about a minute at 20 mm/s). In a file,
   consecutive G1 lines at the same feed run as one path without slowing
   down at the joins, as long as the direction turns by at most corner_deg
   (15) degrees; sharper corners, like the square's, still stop:
 
-  scara gcode /usr/share/scara/circle.gcode
+  scara gcode /usr/share/scara/spiral.gcode
 
   scara gcode - streams stdin, for a sender on the PC that waits for an
   answer to each line before sending the next: every line is checked
