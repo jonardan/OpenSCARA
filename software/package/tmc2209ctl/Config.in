@@ -4,4 +4,5 @@ config BR2_PACKAGE_TMC2209CTL
 	  Command line tool to drive stepper motors through Trinamic
 	  TMC2209 drivers sharing one UART: configuration and velocity
 	  mode over the single-wire UART (PDN_UART), exact and
-	  synchronised moves over STEP/DIR GPIOs.
+	  synchronised moves over STEP/DIR GPIOs.  Also installs "scara",
+	  the arm-level commands (joint angles).

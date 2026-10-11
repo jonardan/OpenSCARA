@@ -217,6 +217,16 @@ direction toward each switch is `home_dir` in `tmc2209.conf`; it starts at
 `board/beaglebone/readme.txt`. After homing, `/run/scara.pos` holds each
 motor's position and a homed flag.
 
+## Joint angles
+
+`scara` is the arm-level program (built from the same package, sharing the
+driver code in `tmc2209.c`). `scara joint A1 A2` moves the shoulder and
+elbow to absolute angles together, `scara jog J DEG` turns one joint
+relative to where it is, and `scara where` prints the angles. Joint moves
+need homing and stay inside `min_angle`..`max_angle` from `tmc2209.conf`.
+How to measure `home_angle` and the limits on the arm:
+`board/beaglebone/readme.txt`, "Joint angles: scara".
+
 ## Why STEP 2 is on P9_12 and not P9_28
 
 P9_28 is wired to the HDMI chip as an audio data line (McASP0 AXR2). Even with
