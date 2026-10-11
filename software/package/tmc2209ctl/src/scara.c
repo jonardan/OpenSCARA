@@ -44,6 +44,8 @@ static void usage(void)
 "                        picks the elbow side (default: one inside the\n"
 "                        limits, the closer to the current pose)\n"
 "                        fk and ik only compute, they don't move\n"
+"  goto X Y [+|-] [RPM]  move the tip to X/Y (mm): ik, then the joint\n"
+"                        move; needs homing\n"
 "\n"
 "  Angles: shoulder from the +X axis, elbow from the line of link 1\n"
 "  (0 = straight), counter-clockwise positive seen from above.  X/Y in\n"
@@ -205,21 +207,17 @@ static int move_joints(int n, const int *mi, const double *usteps, double rpm)
 	return cmd_where();
 }
 
-static int cmd_joint(int argc, char **argv)
+/*
+ * Move both joints together to absolute angles target[] (deg).  Checks
+ * everything before moving anything: both joints homed, limits measured,
+ * target inside them.
+ */
+static int move_to_angles(const double target[NJOINTS], double rpm)
 {
 	static const int both[NJOINTS] = { 0, 1 };
-	double target[NJOINTS], usteps[NJOINTS], upd, rpm = motors[0].rpm;
+	double usteps[NJOINTS], upd;
 	int j;
 
-	if (argc < 3 || argc > 4) {
-		err("usage: joint A1 A2 [RPM]");
-		return -1;
-	}
-	if (parse_num(argv[1], &target[0]) || parse_num(argv[2], &target[1]) ||
-	    (argc > 3 && parse_num(argv[3], &rpm)))
-		return -1;
-
-	/* Check everything before moving anything */
 	pos_load();
 	for (j = 0; j < NJOINTS; j++) {
 		const struct config *c = &motors[j];
@@ -249,6 +247,55 @@ static int cmd_joint(int argc, char **argv)
 		usteps[j] = lround(target[j] * upd) - pos[j];
 	}
 	return move_joints(NJOINTS, both, usteps, rpm);
+}
+
+static int cmd_joint(int argc, char **argv)
+{
+	double target[NJOINTS], rpm = motors[0].rpm;
+
+	if (argc < 3 || argc > 4) {
+		err("usage: joint A1 A2 [RPM]");
+		return -1;
+	}
+	if (parse_num(argv[1], &target[0]) || parse_num(argv[2], &target[1]) ||
+	    (argc > 3 && parse_num(argv[3], &rpm)))
+		return -1;
+	return move_to_angles(target, rpm);
+}
+
+/* goto X Y [+|-] [RPM]: IK, then the same joint move as 'joint' */
+static int cmd_goto(int argc, char **argv)
+{
+	double x, y, th[NJOINTS], now[NJOINTS], rpm = motors[0].rpm;
+	enum elbow side = ELBOW_ANY;
+	enum kin_result r;
+	struct arm a;
+	int i = 3;
+
+	if (argc < 3 || argc > 5) {
+		err("usage: goto X Y [+|-] [RPM]");
+		return -1;
+	}
+	if (parse_num(argv[1], &x) || parse_num(argv[2], &y) || get_arm(&a))
+		return -1;
+	if (i < argc && (!strcmp(argv[i], "+") || !strcmp(argv[i], "-")))
+		side = argv[i++][0] == '+' ? ELBOW_POS : ELBOW_NEG;
+	if (i < argc && parse_num(argv[i++], &rpm))
+		return -1;
+	if (i < argc) {
+		err("usage: goto X Y [+|-] [RPM]");
+		return -1;
+	}
+	if (get_angles(now)) {
+		err("the arm is not homed; run 'scara home'");
+		return -1;
+	}
+	r = kin_inverse(&a, x, y, side, now, th);
+	if (r != KIN_OK) {
+		err("%.2f, %.2f: %s", x, y, kin_strerror(r));
+		return -1;
+	}
+	return move_to_angles(th, rpm);
 }
 
 static int cmd_jog(int argc, char **argv)
@@ -336,6 +383,8 @@ int main(int argc, char **argv)
 		return cmd_fk(argc, argv) ? 1 : 0;
 	if (!strcmp(c, "ik"))
 		return cmd_ik(argc, argv) ? 1 : 0;
+	if (!strcmp(c, "goto"))
+		return cmd_goto(argc, argv) ? 1 : 0;
 	err("unknown command '%s' (try 'scara help')", c);
 	return 1;
 }
