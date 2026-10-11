@@ -245,8 +245,11 @@ accelerates only at the ends of the line.
 `gcode.c` parses one G-code line (G0, G1, G28, G90/G91, G21, M3/M5, comments)
 with no hardware code, tested on the PC with `make test` like the math.
 `scara gcode FILE` checks every line and every move of the file, then runs
-G0 as `goto`, G1 as `line` and G28 as `home`. A sample square is installed
-as `/usr/share/scara/square.gcode`.
+G0 as `goto`, G1 as `line` and G28 as `home`. `scara gcode -` streams stdin
+instead: each line is checked from where the arm is, run, and answered `ok`
+(or `error`), so a PC-side sender can feed a drawing over the console. A
+sample square and a circle of G1 segments are installed in
+`/usr/share/scara/`.
 
 ## Why STEP 2 is on P9_12 and not P9_28
 

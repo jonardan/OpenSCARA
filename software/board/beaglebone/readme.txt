@@ -340,7 +340,7 @@ Straight lines: scara line
 
 G-code: scara gcode
 -------------------
-  scara gcode FILE runs a G-code file (- reads stdin until Ctrl-D):
+  scara gcode FILE runs a G-code file:
   G0 X Y is goto, G1 X Y F is line (F in mm/min, kept for the next
   lines; default line_speed), G28 homes, G90 / G91 absolute / relative,
   G21 mm. A line with only X/Y repeats the last G0/G1. Comments ; and
@@ -358,6 +358,23 @@ G-code: scara gcode
 
   scara gcode -n /usr/share/scara/square.gcode
   scara gcode /usr/share/scara/square.gcode
+
+  A circle, 50 mm radius around X200 Y0, as 72 G1 segments; the arm
+  stops briefly at each segment (no look-ahead across lines yet):
+
+  scara gcode /usr/share/scara/circle.gcode
+
+  scara gcode - streams stdin, for a sender on the PC that waits for an
+  answer to each line before sending the next: every line is checked
+  from where the arm is (reach, joint limits), run, then answered "ok".
+  A bad line is answered "error" (the reason on stderr) and stops it;
+  so does Ctrl-C. Ctrl-D or M2 ends it. By hand:
+
+  scara gcode -
+  G28
+  G0 X200 Y0                  -> moves, then ok
+  G1 X200 Y80 F600            -> line at 10 mm/s, then ok
+  G1 X500                     -> error: out of reach, nothing moves
 
 Configuration: /etc/tmc2209.conf
 --------------------------------
