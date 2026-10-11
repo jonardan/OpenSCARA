@@ -11,11 +11,12 @@
  *     P9_16  GPIO1_19   STEP
  *     P9_18  GPIO0_4    DIR
  *   Motor 2 (UART address 2, MS1=GND MS2=3.3V)
- *     P9_28  GPIO3_17   STEP
+ *     P9_12  GPIO1_28   STEP
  *     P9_30  GPIO3_16   DIR
  *
- * P9_28 is normally the HDMI audio data line (McASP0 AXR2), so HDMI
- * audio is disabled here to free it. HDMI video is unaffected.
+ * STEP 2 was on P9_28 but that pin stays at ~3.3 V even when driven low
+ * (measured 2026-10-09, shield removed), so it moved to P9_12. HDMI audio
+ * stays disabled so nothing else drives P9_28. HDMI video is unaffected.
  */
 #include "am335x-boneblack.dts"
 
@@ -39,7 +40,7 @@
 			AM33XX_PADCONF(AM335X_PIN_GPMC_A3, PIN_OUTPUT_PULLDOWN, MUX_MODE7)	/* P9_16 STEP 1 */
 			AM33XX_PADCONF(AM335X_PIN_SPI0_D1, PIN_OUTPUT_PULLDOWN, MUX_MODE7)	/* P9_18 DIR 1 */
 			AM33XX_PADCONF(AM335X_PIN_MCASP0_AXR0, PIN_OUTPUT_PULLDOWN, MUX_MODE7)	/* P9_30 DIR 2 */
-			AM33XX_PADCONF(AM335X_PIN_MCASP0_AHCLKR, PIN_OUTPUT_PULLDOWN, MUX_MODE7)	/* P9_28 STEP 2 */
+			AM33XX_PADCONF(AM335X_PIN_GPMC_BEN1, PIN_OUTPUT_PULLDOWN, MUX_MODE7)	/* P9_12 STEP 2 */
 		>;
 	};
 };
@@ -50,7 +51,7 @@
 	status = "okay";
 };
 
-/* HDMI audio off: releases P9_28 (McASP0 AHCLKR/AXR2) for STEP 2 */
+/* HDMI audio off: keeps McASP0 off P9_28 (AHCLKR/AXR2), see above */
 &mcasp0 {
 	status = "disabled";
 };

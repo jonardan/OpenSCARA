@@ -38,7 +38,7 @@ Pin summary
   UART address          0                        2
   MS1                   GND                      GND
   MS2                   GND                      3.3V (BBB P9_3)
-  STEP                  P9_16  (GPIO1_19)        P9_28  (GPIO3_17) *
+  STEP                  P9_16  (GPIO1_19)        P9_12  (GPIO1_28) *
   DIR                   P9_18  (GPIO0_4)         P9_30  (GPIO3_16)
   PDN_UART (pin 4)      shared UART bus          shared UART bus
   EN, CLK               GND                      GND
@@ -49,13 +49,12 @@ Pin summary
                     P9_26 UART1_RX ------------+--> driver 2 PDN_UART
   (ONE 1 kOhm resistor for both drivers; RX connects to the bus directly)
 
-  * P9_28 IS NORMALLY THE HDMI AUDIO LINE
+  * STEP 2 USED TO BE P9_28
     On the BeagleBone Black, P9_28 is wired to the HDMI chip as the audio
-    data line (McASP0 AXR2) and the stock device tree claims it for HDMI
-    audio. This image's device tree (am335x-boneblack-tmc2209.dts)
-    disables HDMI audio (&mcasp0 and the /sound node) so P9_28 can be used
-    as a GPIO. HDMI video still works; there is no sound over HDMI.
-    P9_25, P9_29 and P9_31 are also HDMI audio pins and stay unusable.
+    data line (McASP0 AXR2). Even with HDMI audio disabled in this image's
+    device tree, P9_28 stayed at ~3.3 V when driven low (measured with the
+    shield removed), so motor 2 never saw a STEP pulse. STEP 2 is now on
+    P9_12. HDMI audio stays disabled; HDMI video still works.
 
   UART address = MS1 + 2 x MS2   (pin to GND = 0, pin to 3.3V = 1)
       MS2   MS1   address
@@ -93,7 +92,7 @@ Wiring (power everything OFF while wiring)
                                   └────┼───────────┤ 4  PDN_UART     |
                                        │           | 5  (leave open) |
                                        └───────────┤ 6  CLK          |
-  P9_28 GPIO3_17 ●─────────────────────────────────┤ 7  STEP         |
+  P9_12 GPIO1_28 ●─────────────────────────────────┤ 7  STEP         |
   P9_30 GPIO3_16 ●─────────────────────────────────┤ 8  DIR          |
                                                    +-----------------+
   (P9_3 and P9_4 are both 3.3V; P9_3 feeds VIO below, P9_4 is handy for
@@ -127,12 +126,14 @@ Wiring (power everything OFF while wiring)
        | P9  1 ● ● 2        P8 1 ● ● 2|   <- pins 1/2 at the jack end
        |     3 ● ● 4           3 ● ● 4|
        |       ...               ...  |
+       |    11 ● ● 12   STEP 2 = 12   |
+       |       ...                    |
        |    15 ● ● 16   STEP 1 = 16   |
        |    17 ● ● 18   DIR 1  = 18   |
        |       ...                    |
        |    23 ● ● 24   UART TX = 24  |
        |    25 ● ● 26   UART RX = 26  |
-       |    27 ● ● 28   STEP 2 = 28   |
+       |    27 ● ● 28   (do not use)  |
        |    29 ● ● 30   DIR 2  = 30   |
        |       ...                    |
        |    45 ● ● 46                 |
@@ -148,7 +149,7 @@ Wiring (power everything OFF while wiring)
     BBB P9_4  (3.3V)      -> driver 2: MS2
     BBB P9_16 (GPIO1_19)  -> driver 1: STEP
     BBB P9_18 (GPIO0_4)   -> driver 1: DIR
-    BBB P9_28 (GPIO3_17)  -> driver 2: STEP  (needs HDMI audio off - done)
+    BBB P9_12 (GPIO1_28)  -> driver 2: STEP
     BBB P9_30 (GPIO3_16)  -> driver 2: DIR
     BBB P9_24 (UART1_TX)  -> 1 kOhm resistor -> PDN_UART (pin 4) of BOTH
     BBB P9_26 (UART1_RX)  -> PDN_UART (pin 4) of BOTH, directly
@@ -172,9 +173,9 @@ P9 pins that do NOT work for STEP/DIR (for future changes)
   P9_32-40             analog (AIN0-6, max 1.8 V, inputs only)
   P9_19/20             I2C2 (cape EEPROM)
   P9_24/26             UART1 (the TMC bus)
-  P9_25/28/29/31       HDMI audio (P9_28 freed here by disabling it)
+  P9_25/28/29/31       HDMI audio (P9_28 also stuck high on our board)
   P9_41/42             each wired to two processor pins - avoid
-  Still free: P9_11, 12, 13, 14, 15, 17, 21, 22, 23, 27
+  Still free: P9_11, 13, 14, 15, 17, 21, 22, 23, 27
 
 Using it
 --------
@@ -218,7 +219,7 @@ Configuration: /etc/tmc2209.conf
 
     [motor2]
     address = 2
-    step_line = P9_28 [spi1_cs0]
+    step_line = P9_12
     dir_line = P9_30 [spi1_d1]
     current_ma = 800
     invert_dir = 1
