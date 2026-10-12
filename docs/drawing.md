@@ -10,6 +10,19 @@ Three steps, all from the PC:
 
 Both tools are plain Python 3, standard library only.
 
+## Or draw in the browser: `tools/disegna.html`
+
+Open `tools/disegna.html` in any browser (PC or phone, works offline). It
+shows the area the tip can reach with the joint limits of `tmc2209.conf`
+(darker: both elbow sides, lighter: one side only), lets you draw in it
+(freehand, line, polyline, rectangle, circle) and saves the drawing as
+G-code in the same format as `svg2gcode.py`. Every stroke is checked
+live with the same kinematics as `scara gcode -n` (a port of
+`kinematics.c` and `line.c`), so a red stroke is one the board would
+refuse. "Simula" plays the arm through the drawing; "Apri .gcode" loads
+an existing file to look at it. The arm lengths and limits are editable
+under "Parametri del braccio" if you recalibrate.
+
 ## 1. Make the drawing (Inkscape)
 
 - Any SVG works; the page size does not matter, the drawing is scaled to
