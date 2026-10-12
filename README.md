@@ -51,6 +51,9 @@ scara line 250 50                            # straight line to X250 Y50 (mm)
 scara gcode /usr/share/scara/spiral.gcode    # draw a spiral
 ```
 
+Draw by hand inside the arm's reach: open `tools/disegna.html` in a
+browser, draw, and save the G-code (details in the drawing guide).
+
 Draw your own picture from an SVG, on the PC:
 
 ```bash
