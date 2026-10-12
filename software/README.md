@@ -1,9 +1,33 @@
-# OpenSCARA wiring
+# 🔌 OpenSCARA software and wiring
 
-How the BeagleBone Black (BBB), the two BIGTREETECH TMC2209 V1.3 drivers, the
-two NEMA 17 motors, the endstops and the power supplies connect.
+This folder is the Buildroot `BR2_EXTERNAL` tree that builds the SD-card
+image for the [OpenSCARA](../README.md) arm, and this page is the wiring
+guide: how the BeagleBone Black (BBB), the two BIGTREETECH TMC2209 V1.3
+drivers, the two NEMA 17 motors, the endstops and the power supplies
+connect.
 
-Sources of truth, in this order:
+## 📁 What is in this folder
+
+| Path | What it is |
+|---|---|
+| [`configs/robotarm_defconfig`](configs/robotarm_defconfig) | the Buildroot configuration |
+| [`package/tmc2209ctl/`](package/tmc2209ctl/) | `tmc2209ctl` and `scara` (C), their config file and boot script |
+| [`board/beaglebone/`](board/beaglebone/) | device tree, boot files, image layout and the [bring-up guide](board/beaglebone/readme.txt) |
+
+Build it from the Buildroot source directory:
+
+```bash
+make BR2_EXTERNAL=/path/to/OpenSCARA/software robotarm_defconfig   # once
+make                                                               # output/images/sdcard.img
+```
+
+The host tests for the math and the G-code parser run with `make test` in
+`package/tmc2209ctl/src`. Every command is described in the
+📖 [command reference](../docs/commands.md).
+
+## 📌 Sources of truth
+
+For the wiring, in this order:
 
 - `package/tmc2209ctl/tmc2209.conf`: STEP/DIR pins and UART addresses the program uses
 - `board/beaglebone/dts/ti/omap/am335x-boneblack-tmc2209.dts`: pin muxing
@@ -14,7 +38,7 @@ If this file disagrees with those, they win; please fix this file.
 > **Power everything off while wiring.** Never plug or unplug a motor while
 > 12 V is on: it destroys the driver.
 
-## Overview
+## 🗺️ Overview
 
 ```mermaid
 flowchart LR
@@ -43,7 +67,7 @@ flowchart LR
     ES2["Endstop 2"] -.-> E
 ```
 
-## Pin table
+## 📋 Pin table
 
 ### BeagleBone Black P9 header
 
@@ -88,7 +112,7 @@ In UART mode MS1/MS2 only set the address; microstepping, current and
 stealthChop/spreadCycle are set by `tmc2209ctl` from `/etc/tmc2209.conf`
 (defaults: 600 mA RMS, 50 % hold, 1/16 microsteps, stealthChop).
 
-## Signals
+## 〰️ Signals
 
 ```
 BEAGLEBONE BLACK P9                               DRIVER 1  (address 0)
@@ -120,7 +144,7 @@ P9_30 GPIO3_16 o─────────────────────�
 Never ground PDN_UART: the UART stops answering. A driver only answers on
 UART while its VM (12 V) is present.
 
-## Power and motors
+## ⚡ Power and motors
 
 Same for both drivers:
 
@@ -151,7 +175,7 @@ BBB P9_2  GND  o─────────────────────�
   `/etc/tmc2209.conf`.
 - **Current**: start low. A typical NEMA 17 is 1.0 to 1.7 A peak; RMS = peak / 1.41.
 
-## Grounds
+## ⏚ Grounds
 
 All grounds must be common. The TMC2209 module connects its two GND pins
 internally, so wiring the logic GND to the BBB (P9_2) and the power GND to the
@@ -168,7 +192,7 @@ flowchart LR
     BBB --- ES["Endstop commons"]
 ```
 
-## Endstops
+## 🛑 Endstops
 
 The device tree muxes P9_14 and P9_22 as GPIO inputs with the internal
 pull-up. Each motor's switch is `endstop_line` in `tmc2209.conf`;
@@ -206,7 +230,7 @@ gpioget $(gpiofind "P9_14 [ehrpwm1a]")    # motor 1: 1 = open, 0 = pressed
 gpioget $(gpiofind "P9_22 [spi0_sclk]")   # motor 2
 ```
 
-## Homing
+## 🏠 Homing
 
 `tmc2209ctl home` homes motor 2 (elbow) and then motor 1 (shoulder):
 each joint turns toward its switch, backs off 5°, comes back slowly and
@@ -217,7 +241,7 @@ direction toward each switch is `home_dir` in `tmc2209.conf`; it starts at
 `board/beaglebone/readme.txt`. After homing, `/run/scara.pos` holds each
 motor's position and a homed flag.
 
-## Joint angles
+## 📐 Joint angles
 
 `scara` is the arm-level program (built from the same package, sharing the
 driver code in `tmc2209.c`). `scara joint A1 A2` moves the shoulder and
@@ -227,7 +251,7 @@ need homing and stay inside `min_angle`..`max_angle` from `tmc2209.conf`.
 How to measure `home_angle` and the limits on the arm:
 `board/beaglebone/readme.txt`, "Joint angles: scara".
 
-## X/Y
+## 📍 X/Y
 
 `kinematics.c` converts joint angles to the tip X/Y (mm, from the shoulder
 axis) and back, using `link1_mm` / `link2_mm` from `tmc2209.conf`. It has no
@@ -240,7 +264,7 @@ splits it into 1 mm segments with IK at each point (host-tested too), and
 `move_path` in `tmc2209.c` streams them through one stepping loop that
 accelerates only at the ends of the line.
 
-## G-code
+## 🧾 G-code
 
 `gcode.c` parses one G-code line (G0, G1, G28, G90/G91, G21, M3/M5, comments)
 with no hardware code, tested on the PC with `make test` like the math.
@@ -253,7 +277,7 @@ In a file, consecutive G1 lines that bend by at most `corner_deg` run as one
 sample square and a spiral of G1 segments are installed in
 `/usr/share/scara/`.
 
-## Why STEP 2 is on P9_12 and not P9_28
+## ⚠️ Why STEP 2 is on P9_12 and not P9_28
 
 P9_28 is wired to the HDMI chip as an audio data line (McASP0 AXR2). Even with
 HDMI audio disabled in the device tree it stayed at ~3.3 V when driven low
@@ -261,7 +285,7 @@ HDMI audio disabled in the device tree it stayed at ~3.3 V when driven low
 pulse. STEP 2 moved to P9_12 (commit f9df4e6). HDMI audio stays disabled; HDMI
 video still works. **Do not use P9_28.**
 
-## P9 pins that do not work for STEP/DIR/endstops
+## 🚫 P9 pins that do not work for STEP/DIR/endstops
 
 | Pins | Why |
 |---|---|
