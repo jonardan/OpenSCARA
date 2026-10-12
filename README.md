@@ -141,8 +141,6 @@ unplugged switch can't wind the arm into its hard stop.
 
 ## 🚧 Not done yet
 
-- The tip LED is not wired to the board yet, so `M3`/`M5` are accepted
-  but ignored; for now the LED is taped on and always on.
 - The square test comes out slightly rotated and long, probably from
   loose belts; it will be redone once they are tensioned.
 

@@ -3,6 +3,7 @@
 G21 G90
 G28
 G0 X205 Y0      ; start of the spiral, rapid
+M3              ; LED on for the G1 lines
 G1 F1200        ; 20 mm/s
 X205.189 Y0.454
 X205.334 Y0.941
@@ -364,4 +365,5 @@ X276.670 Y-20.544
 X278.374 Y-13.820
 X279.488 Y-6.954
 X280.000 Y0.000
+M5
 M2

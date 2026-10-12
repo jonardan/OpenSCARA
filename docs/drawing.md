@@ -44,8 +44,10 @@ drawing toward +X), use `--rotate -90`.
 The output uses only what `scara gcode` accepts: `G21 G90`, `G28`, then for
 each stroke `G0` to its start, `M3`, `G1` pieces (F on the first), `M5`,
 and `M2` at the end. Strokes are ordered nearest-first (and reversed when
-that is shorter) to cut the travel. M3/M5 switch the tip LED once it is
-wired (issue 03); until then `scara` ignores them with a warning.
+that is shorter) to cut the travel. The tip LED (P8_12) lights only on
+the `G1` lines between `M3` and `M5`, so the `G0` travel between strokes
+leaves no trace in a long-exposure photo. `tools/disegna.html` writes the
+same shape (its "M3/M5 attorno a ogni tratto" box, on by default).
 
 With a pen there is no lift (no Z): the G0 moves between strokes draw too.
 The LED is the intended tool.

@@ -16,6 +16,8 @@
  *   Endstops (switch to GND, internal pull-up: 1 = open, 0 = pressed)
  *     P9_14  GPIO1_18   motor 1
  *     P9_22  GPIO0_2    motor 2
+ *   Tip LED (gpio-leds "tip", /sys/class/leds/tip; pulled down, off at boot)
+ *     P8_12  GPIO1_12
  *
  * STEP 2 was on P9_28 but that pin stays at ~3.3 V even when driven low
  * (measured 2026-10-09, shield removed), so it moved to P9_12. HDMI audio
@@ -25,6 +27,19 @@
 
 / {
 	model = "TI AM335x BeagleBone Black + 2x TMC2209";
+
+	/* Held by the kernel so it stays on after "scara led on" exits */
+	leds-tip {
+		compatible = "gpio-leds";
+		pinctrl-names = "default";
+		pinctrl-0 = <&tip_led_pins>;
+
+		led-tip {
+			label = "tip";
+			gpios = <&gpio1 12 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+	};
 };
 
 &am33xx_pinmux {
@@ -44,6 +59,13 @@
 			AM33XX_PADCONF(AM335X_PIN_SPI0_D1, PIN_OUTPUT_PULLDOWN, MUX_MODE7)	/* P9_18 DIR 1 */
 			AM33XX_PADCONF(AM335X_PIN_MCASP0_AXR0, PIN_OUTPUT_PULLDOWN, MUX_MODE7)	/* P9_30 DIR 2 */
 			AM33XX_PADCONF(AM335X_PIN_GPMC_BEN1, PIN_OUTPUT_PULLDOWN, MUX_MODE7)	/* P9_12 STEP 2 */
+		>;
+	};
+
+	/* Pulled down so the LED stays off until the driver takes the line */
+	tip_led_pins: tip-led-pins {
+		pinctrl-single,pins = <
+			AM33XX_PADCONF(AM335X_PIN_GPMC_AD12, PIN_OUTPUT_PULLDOWN, MUX_MODE7)	/* P8_12 tip LED */
 		>;
 	};
 

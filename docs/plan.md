@@ -26,7 +26,7 @@ the step that first needs them.
 | `endstop_line`, `endstop_nc` (per motor) | GPIO line, normally-closed switch | P9_14 / P9_22, 0 | 2 |
 | `link1_mm` | shoulder axis to elbow axis | 195.4 | 5 |
 | `link2_mm` | elbow axis to tool tip | 166.4 | 5 |
-| `led_line` | GPIO line for the tip LED | P9_23 (proposed) | 8 |
+| `led` | tip LED name in /sys/class/leds (P8_12 in the device tree) | tip | 8 |
 
 Mechanics: motor 1 sits on the base and turns link 1 (shoulder). Motor 2
 rides on link 1 and turns link 2 (elbow), so the elbow angle is relative to
@@ -185,12 +185,18 @@ a few mA (a BBB pin gives ~4–6 mA safely).
 
 Test: `scara led on/off` from the shell; the LED is off after a reboot.
 
+Done (2026-10-12, on P8_12 instead of P9_23): P8_12 is a gpio-leds LED
+"tip" in the device tree rather than a GPIO line in the config, because a
+line requested by `scara` goes back to an input when it exits, which would
+switch the LED off. `led = tip` in the config names it; `scara led` alone
+prints the state.
+
 ### 9. G-code parser (host-tested)
 
 `gcode.c`: parse one line into a command, separate from moving anything.
 First set:
 
-- `G0 X Y` rapid move (LED left as is), `G1 X Y F` straight line at feed F
+- `G0 X Y` rapid move (LED off), `G1 X Y F` straight line at feed F
   (mm/min, G-code convention)
 - `G28` home
 - `G90` / `G91` absolute / relative, `G21` mm (only mm supported)
@@ -204,8 +210,7 @@ Test on the PC: `make test` with sample lines and a sample file.
 Done, with part of step 10 pulled in: `scara gcode [-n] FILE` checks the
 whole file (syntax, then every move planned from the previous one, first
 unreachable point with its line number), then runs it with `goto`, `line`
-and `home`. M3/M5 are parsed but ignored with a warning until step 8 (LED)
-is done; see `.scratch/inbox/issues/03-tip-led.md`.
+and `home`. M3/M5 drive the LED since step 8.
 
 ### 10. Run G-code: `scara gcode FILE` (or `-` for stdin)
 
@@ -221,9 +226,11 @@ exposure photo.
 
 Done: the file form came with step 9. `scara gcode -` now streams: each
 line is checked from where the arm is, run, and answered `ok` (`error`
-stops it). `/usr/share/scara/spiral.gcode` (G1 segments) replaces the circle test. The LED
-part (M3/M5, LED off on Ctrl-C) waits for step 8, see
-`.scratch/inbox/issues/03-tip-led.md`.
+stops it). `/usr/share/scara/spiral.gcode` (G1 segments) replaces the circle test.
+LED: M3/M5 set the tool, and the LED is on only while a G1 moves with the
+tool on (off for G0 travel and G28, so travel moves leave no trace in the
+photo). It goes off when the file ends, fails or is stopped (Ctrl-C,
+SIGTERM, SIGHUP).
 
 ## Later (not planned in detail)
 

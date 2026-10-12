@@ -47,6 +47,7 @@ file instead of `/etc/tmc2209.conf`. `scara help` prints the list.
 | `scara line X Y [F]` | Moves the tip to X/Y in a **straight line** at F mm/s (default `line_speed`). The elbow stays on its side, and every point is checked before moving. |
 | `scara gcode [-n] FILE` | Runs a G-code file (below). `-n` only checks it. |
 | `scara gcode [-n] -` | Streams G-code from stdin, answering `ok` or `error` per line. |
+| `scara led [on\|off]` | Switches the tip LED (P8_12) by hand; alone it prints `led: on` or `off`. |
 
 RPM is the speed of the motor that moves furthest (default `rpm`). If a
 line would turn a motor faster than its `rpm`, the whole line runs slower
@@ -92,7 +93,7 @@ nothing moves. Then it runs, printing each line.
 | `G28` | home |
 | `G90` / `G91` | absolute / relative coordinates |
 | `G21` | millimetres |
-| `M3` / `M5` (`M106` / `M107`) | tool on / off: accepted but ignored with a warning until the tip LED is wired |
+| `M3` / `M5` (`M106` / `M107`) | tool on / off: the tip LED lights only while a `G1` draws after `M3`; it is off during `G0`, `G28` and after `M5`, and off when the file ends, fails or is stopped |
 | `M2` / `M30` | end of program |
 | `Z` | accepted and ignored with a warning (the arm has no Z) |
 

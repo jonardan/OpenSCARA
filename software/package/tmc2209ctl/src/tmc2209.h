@@ -80,6 +80,7 @@ struct config {
 	double line_speed;	/* default tip speed for lines, mm/s (shared) */
 	double line_accel;	/* tip acceleration for lines, mm/s^2 (shared) */
 	double corner_deg;	/* G-code: G1 lines bending less run as one */
+	char led[32];		/* tip LED name in /sys/class/leds (shared) */
 };
 
 extern struct config cfg, motors[MAX_MOTORS];

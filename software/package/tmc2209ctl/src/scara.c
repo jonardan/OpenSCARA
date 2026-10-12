@@ -61,10 +61,13 @@ static void usage(void)
 "                        and the elbow stays on the side it is on\n"
 "  gcode [-n] FILE       run a G-code file: G0 X Y (goto), G1 X Y F\n"
 "                        (line, F in mm/min), G28 (home), G90 / G91, G21;\n"
-"                        M3/M5 and Z are ignored for now.  Every line is\n"
-"                        checked before anything moves; -n only checks.\n"
+"                        M3/M5 (tool on/off: the tip LED lights only\n"
+"                        while G1 draws with the tool on); Z ignored.\n"
+"                        Every line is checked before anything moves;\n"
+"                        -n only checks.\n"
 "                        FILE - streams stdin: each line is checked, run\n"
 "                        and answered ok (or error, and it stops)\n"
+"  led [on|off]          switch the tip LED, or print its state\n"
 "\n"
 "  Angles: shoulder from the +X axis, elbow from the line of link 1\n"
 "  (0 = straight), counter-clockwise positive seen from above.  X/Y in\n"
@@ -488,6 +491,68 @@ static int cmd_home(int argc, char **argv)
 	return cmd_where();
 }
 
+/*
+ * The tip LED is a gpio-leds device from the device tree, not a GPIO line
+ * requested here: a requested line goes back to an input when the program
+ * exits, which would switch the LED off.  The kernel holds it instead.
+ */
+static const char *led_path(void)
+{
+	static char path[96];
+
+	snprintf(path, sizeof(path), "/sys/class/leds/%s/brightness",
+		 motors[0].led);
+	return path;
+}
+
+/* Last state written to the LED: -1 not known yet */
+static int led_state = -1;
+
+/* Switch the LED; a failure is reported once and doesn't stop a drawing */
+static int led_set(int on)
+{
+	static int said;
+	FILE *f;
+
+	if (on == led_state)
+		return 0;
+	f = fopen(led_path(), "w");
+	if (!f || fputs(on ? "1" : "0", f) < 0 || fclose(f)) {
+		if (!said++)
+			err("%s: %s (is led = %s right in %s?)", led_path(),
+			    strerror(errno), motors[0].led, CONF_PATH);
+		led_state = -1;
+		return -1;
+	}
+	led_state = on;
+	return 0;
+}
+
+static int cmd_led(int argc, char **argv)
+{
+	char buf[16];
+	FILE *f;
+
+	if (argc > 2 || (argc == 2 && strcmp(argv[1], "on") &&
+			 strcmp(argv[1], "off"))) {
+		err("usage: led [on|off]");
+		return -1;
+	}
+	if (argc == 2)
+		return led_set(!strcmp(argv[1], "on"));
+	f = fopen(led_path(), "r");
+	if (!f || !fgets(buf, sizeof(buf), f)) {
+		err("%s: %s (is led = %s right in %s?)", led_path(),
+		    strerror(errno), motors[0].led, CONF_PATH);
+		if (f)
+			fclose(f);
+		return -1;
+	}
+	fclose(f);
+	printf("led: %s\n", atoi(buf) ? "on" : "off");
+	return 0;
+}
+
 /* A G-code program: the text of every line and what it parsed to */
 struct prog {
 	const char *name;
@@ -597,7 +662,8 @@ struct run {
 	const char *name;
 	int dry;
 	double th[NJOINTS], x, y, speed;
-	int rel, is_homed, said_z, said_tool;
+	int rel, is_homed, said_z;
+	int tool;		/* M3: G1 moves light the LED, until M5 */
 };
 
 static void run_init(struct run *r, const struct arm *a, const char *name,
@@ -617,7 +683,9 @@ static void run_init(struct run *r, const struct arm *a, const char *name,
  * Run line n, or with r->dry only follow it on paper: the move is planned
  * from where the previous one left the joints, so an unreachable point is
  * found before anything moves.  G0 is 'goto', G1 is 'line', G28 is 'home'.
- * M3/M5 and Z are reported once, on the dry run.  Returns 1 after M2/M30.
+ * The LED is on only during a G1 move after M3: off for G0, G28 and M5
+ * (M3 itself waits for the next G1).  Z is reported once, on the dry run.
+ * Returns 1 after M2/M30.
  */
 static int run_line(struct run *r, const struct gc_line *l, const char *text,
 		    int n)
@@ -636,12 +704,11 @@ static int run_line(struct run *r, const struct gc_line *l, const char *text,
 		printf("%d: %s\n", n, text);
 	if (r->dry && l->has_z && !r->said_z++)
 		printf("%s:%d: Z ignored, the arm has no Z axis\n", r->name, n);
-	if (r->dry && l->tool && !r->said_tool++)
-		printf("%s:%d: M3/M5 ignored, the tip LED is not wired yet\n",
-		       r->name, n);
 	if (l->dist)
 		r->rel = l->dist == GC_REL;
 	if (l->home) {
+		if (!r->dry)
+			led_set(0);
 		if (r->dry) {
 			for (j = 0; j < NJOINTS; j++)
 				r->th[j] = motors[j].home_angle;
@@ -672,16 +739,23 @@ static int run_line(struct run *r, const struct gc_line *l, const char *text,
 				    text, bx, by, kin_strerror(k));
 				return -1;
 			}
-		} else if (l->motion ? line_to(r->a, tx, ty, r->speed) :
-			   goto_xy(r->a, tx, ty, ELBOW_ANY, motors[0].rpm)) {
-			err("%s:%d: %s", r->name, n, text);
-			return -1;
-		} else if (get_angles(r->th)) {
-			return -1;
+		} else {
+			led_set(l->motion && r->tool);
+			if (l->motion ? line_to(r->a, tx, ty, r->speed) :
+			    goto_xy(r->a, tx, ty, ELBOW_ANY, motors[0].rpm)) {
+				err("%s:%d: %s", r->name, n, text);
+				return -1;
+			}
+			if (get_angles(r->th))
+				return -1;
 		}
 		r->x = tx;
 		r->y = ty;
 	}
+	if (l->tool)
+		r->tool = l->tool == GC_TOOL_ON;
+	if (!r->dry && (!r->tool || l->end))
+		led_set(0);
 	return l->end ? 1 : 0;
 }
 
@@ -763,6 +837,7 @@ static int prog_run(const struct prog *p, const struct arm *a, int dry)
 			if (n > 1) {
 				for (k = i; k <= last; k++)
 					printf("%d: %s\n", k + 1, p->text[k]);
+				led_set(c.tool);
 				if (path_to(a, n, (const double (*)[2])xy,
 					    c.speed) || get_angles(c.th)) {
 					err("%s:%d-%d: G1 path failed", p->name,
@@ -817,7 +892,6 @@ static int stream_run(const struct arm *a, int dry)
 		check.dry = 1;
 		ret = run_line(&check, &l, buf, n);
 		r.said_z = check.said_z;
-		r.said_tool = check.said_tool;
 		if (ret >= 0 && !dry)
 			ret = run_line(&r, &l, buf, n);
 		if (dry)
@@ -864,6 +938,8 @@ static int cmd_gcode(int argc, char **argv)
 		stream = quiet = 1;
 		ret = stream_run(&a, dry);
 		stream = quiet = 0;
+		if (!dry)
+			led_set(0);
 		return ret ? ret : dry ? 0 : cmd_where();
 	}
 	if (prog_load(argv[1 + dry], &p))
@@ -876,10 +952,11 @@ static int cmd_gcode(int argc, char **argv)
 		goto out;
 	}
 	quiet = 1;
-	if (prog_run(&p, &a, 0))
-		goto out;
+	ret = prog_run(&p, &a, 0);
+	led_set(0);	/* off however the file ended */
 	quiet = 0;
-	ret = cmd_where();
+	if (!ret)
+		ret = cmd_where();
 out:
 	prog_free(&p);
 	return ret;
@@ -903,6 +980,9 @@ int main(int argc, char **argv)
 	}
 	/* No SA_RESTART, like tmc2209ctl: Ctrl-C decelerates the move */
 	sigaction(SIGINT, &sa, NULL);
+	/* kill or a closed console: stop the same way, so the LED goes off */
+	sigaction(SIGTERM, &sa, NULL);
+	sigaction(SIGHUP, &sa, NULL);
 
 	c = argv[i];
 	argc -= i;
@@ -911,6 +991,8 @@ int main(int argc, char **argv)
 		usage();
 		return 0;
 	}
+	if (!strcmp(c, "led"))
+		return cmd_led(argc, argv) ? 1 : 0;
 	if (need_joints())
 		return 1;
 	if (!strcmp(c, "where"))

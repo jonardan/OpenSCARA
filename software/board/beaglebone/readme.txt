@@ -344,9 +344,11 @@ G-code: scara gcode
   G0 X Y is goto, G1 X Y F is line (F in mm/min, kept for the next
   lines; default line_speed), G28 homes, G90 / G91 absolute / relative,
   G21 mm. A line with only X/Y repeats the last G0/G1. Comments ; and
-  ( ), N line numbers and % are skipped. M3/M5 (M106/M107) and Z are
-  accepted and ignored with a warning (no tip LED yet); anything else,
-  like G2 arcs or G20 inches, stops with the line number.
+  ( ), N line numbers and % are skipped. M3 / M5 (M106 / M107) switch
+  the tool on / off: the tip LED lights only while a G1 draws after M3,
+  never during G0 or G28 (see "Tip LED" below). Z is ignored with a
+  warning; anything else, like G2 arcs or G20 inches, stops with the
+  line number.
 
   The whole file is checked first: a syntax error or a point out of reach
   is reported with its line, and nothing moves. scara gcode -n FILE only
@@ -383,6 +385,34 @@ G-code: scara gcode
   Drawings: docs/drawing.md turns an SVG into G-code
   (tools/svg2gcode.py) and copies it here over this USB cable
   (tools/bbb_send.py).
+Tip LED: scara led
+------------------
+  The LED is on P8_12 (GPIO1_12), through a resistor to GND:
+
+  P8_12 o──[ 330 Ohm ]──|>|──o P8_2 GND     (LED anode toward P8_12)
+
+  330 Ohm gives about 4 mA with a red/green/yellow LED, the most a BBB
+  pin should give. A white or blue LED needs about 3 V, so use 100 Ohm
+  (still under 4 mA). For a brighter LED, drive it through an NPN
+  transistor (e.g. 2N2222: P8_12 --[1 kOhm]-- base, emitter to GND, LED
+  and its resistor from 5 V (P9_7) to the collector).
+
+  The device tree makes it the kernel LED "tip" (/sys/class/leds/tip),
+  pulled down so it is off at boot. The kernel holds the pin, so the LED
+  stays on after the command exits.
+
+  scara led on
+  scara led off
+  scara led                       # prints led: on / off
+
+  In G-code the LED follows M3 / M5, but only on the drawn lines: after
+  M3 it lights at the start of each G1 and goes off for any G0 (travel)
+  or G28; M5 switches it off. When the file ends, fails or is stopped
+  with Ctrl-C (or the console closes), scara switches it off. The square
+  has M3 / M5 around its four sides, so the LED is off while it goes to
+  the first corner and on along the edges:
+
+  scara gcode /usr/share/scara/square.gcode
 
 Configuration: /etc/tmc2209.conf
 --------------------------------

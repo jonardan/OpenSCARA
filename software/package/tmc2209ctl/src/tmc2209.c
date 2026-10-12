@@ -48,6 +48,7 @@ struct config cfg = {
 	.line_speed = 20,
 	.line_accel = 100,
 	.corner_deg = 15,
+	.led = "tip",
 };
 
 /* cfg is the active motor: a copy of motors[cur] */
@@ -165,6 +166,8 @@ static int set_option(const char *key, const char *val)
 		cfg.line_accel = atof(val);
 	else if (!strcmp(key, "corner_deg"))
 		cfg.corner_deg = atof(val);
+	else if (!strcmp(key, "led"))
+		snprintf(cfg.led, sizeof(cfg.led), "%s", val);
 	else
 		return -1;
 	return 0;

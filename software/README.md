@@ -88,6 +88,13 @@ flowchart LR
 | P9_43..P9_46 | GND | endstop common | any BBB GND works |
 | P9_28 | (HDMI audio) | **nothing** | stuck at ~3.3 V on this board, never use |
 
+### BeagleBone Black P8 header
+
+| BBB pin | Signal | Goes to | Notes |
+|---|---|---|---|
+| P8_12 | GPIO1_12 | tip LED anode, through 330 Ω | kernel LED "tip", pulled down (off at boot) |
+| P8_2 | GND | tip LED cathode | P8_1 works too |
+
 ### TMC2209 drivers
 
 | Driver pin | Driver 1 (motor 1) | Driver 2 (motor 2) |
@@ -276,6 +283,19 @@ In a file, consecutive G1 lines that bend by at most `corner_deg` run as one
 `move_path`, so curves made of short segments don't stop at every join. A
 sample square and a spiral of G1 segments are installed in
 `/usr/share/scara/`.
+
+## 💡 Tip LED
+
+P8_12 drives the LED on the tip, through 330 Ω to GND (100 Ω for a white
+or blue LED); a pin gives ~4 mA at most, so use a transistor for anything
+brighter. The device tree makes it the kernel LED `tip`, so the kernel
+holds the pin after the command exits; `led` in `tmc2209.conf` names it.
+
+In G-code, M3 (M106) turns the tool on and M5 (M107) off, but the LED only
+lights while a G1 line is being drawn with the tool on: it is off during
+G0 travel and G28 homing, and `scara gcode` switches it off when the file
+ends, fails or is stopped with Ctrl-C. `scara led on|off` switches it by
+hand. Wiring and test: `board/beaglebone/readme.txt`, "Tip LED: scara led".
 
 ## ⚠️ Why STEP 2 is on P9_12 and not P9_28
 
