@@ -6,6 +6,8 @@ endstops, moves its tip to X/Y in millimetres, draws straight lines and
 runs G-code. The first use is light painting: an LED on the tip draws in
 the air for long-exposure photos.
 
+<p align="center"><img src="docs/media/overview.gif" width="400" alt="The arm moving through its range"></p>
+
 | Folder | What is in it |
 |---|---|
 | [`software/`](software/) | Buildroot tree for the BeagleBone image: `tmc2209ctl` and `scara`, the config, the device tree |
@@ -95,6 +97,17 @@ scara goto 150 -50 +
 scara line 250 -50          # straight edge at line_speed
 scara line 250 50 10        # straight edge at 10 mm/s
 ```
+
+### Homing
+
+<p align="center"><img src="docs/media/homing.gif" width="400" alt="scara home: the arm finds its endstops"></p>
+
+`scara home` homes the elbow first, so the arm is folded before the
+shoulder swings, then the shoulder. Each joint turns toward its switch at
+`home_rpm`, backs off 5 degrees, comes back at `home_rpm / 5` and stops on
+the click; that angle is `home_angle`. It gives up with an error after one
+joint revolution without a click (switch unplugged or broken), and moves
+off the switch first if it is already pressed.
 
 ### G-code
 
