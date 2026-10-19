@@ -1182,6 +1182,26 @@ async function connectRobot() {
   }
   robotButtons();
 }
+/*
+ * Get to a "# " prompt from wherever the console is: the login prompt after
+ * a boot (log in as root), a password prompt, a here-document left open
+ * (Ctrl-C) or a shell. A wrong login takes the board a few seconds.
+ */
+async function shellPrompt() {
+  rx = ""; await send("\n");
+  const t0 = performance.now();
+  while (performance.now() - t0 < 20000) {
+    await sleep(700);
+    if (!port) throw new Error("La scheda si è scollegata.");
+    const tail = rx.slice(-80);
+    if (/login:\s*$/.test(tail)) { rx = ""; rstatus("Entro come root…"); await send("root\n"); }
+    else if (/Password:\s*$/.test(tail)) { rx = ""; await send("\n"); }
+    else if (/\n> $/.test(tail)) { rx = ""; await send("\x03\n"); }
+    else if (/[#$] $/.test(tail)) return;
+    else if (!rx) await send("\n");
+  }
+  throw new Error("La scheda non risponde: è accesa e collegata col cavo mini-USB? Chiudi picocom se è aperto.");
+}
 async function runRobot() {
   if (!port || job) return;
   if (sim.errors.length) { rstatus("Il disegno ha tratti in rosso: scara li rifiuterebbe. Correggili prima."); return; }
@@ -1192,10 +1212,7 @@ async function runRobot() {
   job = { total: lines.length, sent: 0, line: 0, running: false, abort: false, err: "", lineStroke, strokes: strokes.length };
   robotButtons(); stopAnim();
   try {
-    /* a shell prompt: Ctrl-C a half-typed line, log in if the board asks */
-    rx = ""; await send("\x03\n"); await sleep(600);
-    if (/login:\s*$/.test(rx)) { await send("root\n"); await sleep(1200); }
-    if (/Password:\s*$/.test(rx)) { await send("\n"); await sleep(1200); }
+    await shellPrompt();
     rx = ""; await send("echo READY_$((40+2))\n");
     await waitFor(/READY_42/, 5000);
     await sleep(200); rx = "";
