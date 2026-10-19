@@ -140,8 +140,58 @@ static void test_auto_side(void)
 	      "ELBOW_ANY picked %f %f", th[0], th[1]);
 }
 
+/* The table on the +Y side: the tip stays at y <= 0, points and joint moves */
+static void test_table(void)
+{
+	struct arm f = arm;
+	double th[2], from[2], to[2], bx, by;
+
+	f.table_on = 1;
+	f.table_y = 0;
+	CHECK(kin_inverse(&f, 250, 1, ELBOW_ANY, NULL, th) == KIN_TABLE,
+	      "y 1 should be in the table");
+	CHECK(kin_inverse(&f, 250, 0, ELBOW_ANY, NULL, th) == KIN_OK,
+	      "y 0 is on the table edge: allowed");
+	CHECK(kin_inverse(&f, 250, -60, ELBOW_ANY, NULL, th) == KIN_OK,
+	      "y -60 is away from the table");
+	CHECK(kin_inverse(&arm, 250, 1, ELBOW_ANY, NULL, th) == KIN_OK,
+	      "no table: y 1 is fine");
+	f.table_y = -20;
+	CHECK(kin_inverse(&f, 250, -10, ELBOW_ANY, NULL, th) == KIN_TABLE,
+	      "table_y -20");
+	f.table_y = 0;
+
+	/* Both ends clear of the table, the joint-space path between them
+	 * crosses it (the mirror image of 180,120 -> 72,7 for a table on -Y) */
+	CHECK(kin_inverse(&f, 180, -120, ELBOW_NEG, NULL, from) == KIN_OK &&
+	      kin_inverse(&f, 72, -7, ELBOW_POS, NULL, to) == KIN_OK,
+	      "both ends clear of the table");
+	CHECK(kin_joint_move(&f, from, to, &bx, &by) == KIN_TABLE && by > 0,
+	      "joint move should cross: %f %f", bx, by);
+	CHECK(kin_joint_move(&arm, from, to, &bx, &by) == KIN_OK,
+	      "no table: any joint move is fine");
+	/* Out of the folded home pose: straight there swings into the table,
+	 * the shoulder first keeps the folded tip by the shoulder */
+	from[0] = 116.75;
+	from[1] = 171;
+	CHECK(kin_inverse(&f, 150, -120, ELBOW_POS, NULL, to) == KIN_OK,
+	      "150, -120 elbow +");
+	CHECK(kin_joint_move(&f, from, to, &bx, &by) == KIN_TABLE && by > 0,
+	      "out of home in one joint move: into the table (%f %f)", bx, by);
+	th[0] = to[0];
+	th[1] = from[1];
+	CHECK(kin_joint_move(&f, from, th, &bx, &by) == KIN_OK &&
+	      kin_joint_move(&f, th, to, &bx, &by) == KIN_OK,
+	      "shoulder first, then elbow: clear (%f %f)", bx, by);
+	CHECK(kin_inverse(&f, 300, -20, ELBOW_NEG, NULL, from) == KIN_OK &&
+	      kin_inverse(&f, 250, -80, ELBOW_NEG, NULL, to) == KIN_OK &&
+	      kin_joint_move(&f, from, to, &bx, &by) == KIN_OK,
+	      "same side, clear of the table: ok");
+}
+
 int main(void)
 {
+	test_table();
 	test_known_points();
 	test_unreachable();
 	test_round_trip();

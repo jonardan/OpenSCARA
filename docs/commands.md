@@ -47,6 +47,7 @@ file instead of `/etc/tmc2209.conf`. `scara help` prints the list.
 | `scara line X Y [F]` | Moves the tip to X/Y in a **straight line** at F mm/s (default `line_speed`). The elbow stays on its side, and every point is checked before moving. |
 | `scara gcode [-n] FILE` | Runs a G-code file (below). `-n` only checks it. |
 | `scara gcode [-n] -` | Streams G-code from stdin, answering `ok` or `error` per line. |
+| `scara led [COLOR]` | Sets the tip RGB LED by hand: `off`, `on` (white), `red`, `green`, `blue`, `yellow`, `cyan`, `magenta`, `orange`, `purple`, `#rrggbb` or `R G B` (0-255). Alone it prints `led: R G B` or `led: off`. Red (P8_12) is on/off only. |
 
 RPM is the speed of the motor that moves furthest (default `rpm`). If a
 line would turn a motor faster than its `rpm`, the whole line runs slower
@@ -62,9 +63,9 @@ scara joint 0 90            # shoulder to 0, elbow to 90 degrees
 scara fk 0 90               # where would the tip be?
 scara ik 200 100            # which angles reach X200 Y100?
 scara ik 200 100 -          # same point, elbow bent the other way
-scara goto 150 -50 +
-scara line 250 -50          # straight edge at line_speed
-scara line 250 50 10        # straight edge at 10 mm/s
+scara goto 150 20 +
+scara line 250 20           # straight edge at line_speed
+scara line 250 120 10       # straight edge at 10 mm/s
 ```
 
 ### Homing
@@ -92,7 +93,8 @@ nothing moves. Then it runs, printing each line.
 | `G28` | home |
 | `G90` / `G91` | absolute / relative coordinates |
 | `G21` | millimetres |
-| `M3` / `M5` (`M106` / `M107`) | tool on / off: accepted but ignored with a warning until the tip LED is wired |
+| `M3` / `M5` (`M106` / `M107`) | tool on / off: the tip LED lights only while a `G1` draws after `M3`; it is off during `G0`, `G28` and after `M5`, and off when the file ends, fails or is stopped |
+| `M150 R U B [P]` | tip LED colour, Marlin style: R red, U green, B blue, 0-255 each, a missing one is 0; P (0-255) scales all three. It stays until the next `M150` (white before the first) and recolours a line being drawn at once |
 | `M2` / `M30` | end of program |
 | `Z` | accepted and ignored with a warning (the arm has no Z) |
 
@@ -108,7 +110,7 @@ M3/M5 stops there. After `G28` the arm is folded, so start with a `G0`.
 ```bash
 scara gcode -n /usr/share/scara/square.gcode   # check only
 scara gcode /usr/share/scara/square.gcode      # 100 mm square, stops at each corner
-scara gcode /usr/share/scara/spiral.gcode      # one continuous spiral around X200 Y0
+scara gcode /usr/share/scara/spiral.gcode      # one continuous spiral around X200 Y-90
 ```
 
 `scara gcode -` is for a sender on the PC that waits for an answer to each
@@ -120,7 +122,7 @@ next one isn't there yet, so for drawings copy the file and run it.
 ```
 scara gcode -
 G28
-G0 X200 Y0                  -> moves, then ok
+G0 X200 Y-90                -> moves, then ok
 G1 X200 Y80 F600            -> line at 10 mm/s, then ok
 G1 X500                     -> error: out of reach, nothing moves
 ```
@@ -195,6 +197,9 @@ and `[motor2]` (elbow) override them for one motor.
 | `line_speed` | 20 | tip speed for `line` and G1 without F, mm/s |
 | `line_accel` | 400 | tip acceleration at the start and end of a line or path, mm/s² |
 | `corner_deg` | 15 | G1 lines turning by at most this many degrees run as one path; 0 stops at every line |
+| `max_y_mm` | 0 | the table is on the +Y side: the tip never goes past this Y (0 = the X axis). Points, lines and G1 past it are refused; a `goto`/`G0` whose joint move would swing the tip past it turns the shoulder and the elbow one at a time, or goes straight. `off` removes the limit |
+| `led_red` / `led_green` / `led_blue` | tip-red / tip-green / tip-blue | the tip LED's channels in `/sys/class/leds` (P8_12, P8_13, P8_19 in the device tree) |
+| `led_common` | cathode | `anode` for a common anode RGB LED (its long leg on 3.3 V): the pins are inverted |
 | `home_dir` | 1 / 1 | 1 if a positive `turn` moves the joint toward its switch, -1 if away; 0 refuses to home |
 | `home_angle` | 116.75 / 171 | joint angle when the switch clicks, measured with `scara jog` |
 | `min_angle` / `max_angle` | -109.25..111.75 / -171..166 | safe joint range for `joint`, `goto`, `line`, G-code |
@@ -235,16 +240,16 @@ accepts. Strokes are ordered nearest-first to cut the travel between them.
 |---|---|---|
 | `-o FILE` | stdout | output G-code file |
 | `--size` | 150 | longer side of the drawing, mm |
-| `--center` | 200,0 | centre of the drawing, X,Y in mm |
+| `--center` | 200,-90 | centre of the drawing, X,Y in mm |
 | `--rotate` | 0 | turn the drawing counter-clockwise, degrees |
 | `--feed` | 1200 | drawing speed, mm/min (1200 = 20 mm/s) |
 | `--step` | 1 | length of the straight pieces curves are cut into, mm |
 
 ```bash
-python3 tools/svg2gcode.py logo.svg -o logo.gcode --size 120 --center 210,20 --feed 900
+python3 tools/svg2gcode.py logo.svg -o logo.gcode --size 120 --center 210,-100 --feed 900
 ```
 
-A 150 mm drawing centred on X200 Y0 fits comfortably; `scara gcode -n`
+A 150 mm drawing centred on X200 Y-90 fits comfortably; `scara gcode -n`
 tells you if a bigger one doesn't.
 
 ### `tools/bbb_send.py`

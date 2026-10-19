@@ -15,6 +15,8 @@ struct arm {
 	double l2;		/* elbow axis to tool tip, mm */
 	double min[2];		/* joint limits (deg), shoulder and elbow */
 	double max[2];
+	int table_on;		/* the tip must stay at y <= table_y */
+	double table_y;		/* mm: the table's edge (it is on the +Y side) */
 };
 
 /* Which way the elbow bends, for kin_inverse() */
@@ -31,6 +33,7 @@ enum kin_result {
 	KIN_TOO_CLOSE,		/* r < |l1 - l2| */
 	KIN_LIMITS,		/* reachable, but not inside the joint limits */
 	KIN_JUMP,		/* line.c: a joint would jump between two points */
+	KIN_TABLE,		/* y > table_y: the tip would hit the table */
 };
 
 void kin_forward(const struct arm *a, const double th[2], double *x,
@@ -44,6 +47,16 @@ void kin_forward(const struct arm *a, const double th[2], double *x,
  */
 enum kin_result kin_inverse(const struct arm *a, double x, double y,
 			    enum elbow elbow, const double *near, double th[2]);
+
+/*
+ * A joint move from[] to to[] turns both joints together (they start and
+ * finish at the same time), so the tip follows the joint-space line, not
+ * a straight one.  KIN_OK if every point of it, 1 degree apart, stays at
+ * y <= table_y, or within 60 mm of the shoulder axis (the folded tip, as
+ * at home); else KIN_TABLE with the first point past it in *bx, *by.
+ */
+enum kin_result kin_joint_move(const struct arm *a, const double from[2],
+			       const double to[2], double *bx, double *by);
 
 const char *kin_strerror(enum kin_result r);
 

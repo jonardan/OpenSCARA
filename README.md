@@ -14,7 +14,7 @@ G-code (or any SVG drawing) into smooth, straight-line moves of the tip.
 - 🎨 **SVG to robot in three commands**: draw in Inkscape, convert, copy, run.
 - 🏠 **Homes itself** on two endstops keeps every move inside safe joint limits, and checks a whole G-code file before anything moves.
 - 🐧 **One SD-card image**: a small Buildroot Linux for the BeagleBone Black, ready to boot.
-- 💡 **First use: light painting**. An LED on the tip draws in the air for long-exposure photos.
+- 💡 **First use: light painting**. An RGB LED on the tip draws in the air for long-exposure photos, each stroke in its own colour (`M150`).
 
 ## ℹ️ Overview
 
@@ -50,6 +50,12 @@ scara home                                   # find the endstops
 scara line 250 50                            # straight line to X250 Y50 (mm)
 scara gcode /usr/share/scara/spiral.gcode    # draw a spiral
 ```
+
+Draw by hand inside the arm's reach: open `tools/disegna.html` in a
+browser, draw with a colour per stroke, and save the G-code, or, in
+Chrome or Edge with the board on the USB cable, press "Disegna sul robot"
+and it draws straight away (details in the drawing guide). The tip always
+stays above the X axis, on the side away from the table (`max_y_mm`).
 
 Draw your own picture from an SVG, on the PC:
 
@@ -141,8 +147,6 @@ unplugged switch can't wind the arm into its hard stop.
 
 ## 🚧 Not done yet
 
-- The tip LED is not wired to the board yet, so `M3`/`M5` are accepted
-  but ignored; for now the LED is taped on and always on.
 - The square test comes out slightly rotated and long, probably from
   loose belts; it will be redone once they are tensioned.
 

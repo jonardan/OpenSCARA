@@ -48,6 +48,9 @@ struct config cfg = {
 	.line_speed = 20,
 	.line_accel = 100,
 	.corner_deg = 15,
+	.led_red = "tip-red",
+	.led_green = "tip-green",
+	.led_blue = "tip-blue",
 };
 
 /* cfg is the active motor: a copy of motors[cur] */
@@ -165,8 +168,22 @@ static int set_option(const char *key, const char *val)
 		cfg.line_accel = atof(val);
 	else if (!strcmp(key, "corner_deg"))
 		cfg.corner_deg = atof(val);
-	else
+	else if (!strcmp(key, "max_y_mm")) {
+		cfg.max_y_off = !strcmp(val, "off");
+		cfg.max_y_mm = cfg.max_y_off ? 0 : atof(val);
+	} else if (!strcmp(key, "led_red") || !strcmp(key, "led"))
+		snprintf(cfg.led_red, sizeof(cfg.led_red), "%s", val);
+	else if (!strcmp(key, "led_green"))
+		snprintf(cfg.led_green, sizeof(cfg.led_green), "%s", val);
+	else if (!strcmp(key, "led_blue"))
+		snprintf(cfg.led_blue, sizeof(cfg.led_blue), "%s", val);
+	else if (!strcmp(key, "led_common")) {
+		if (strcmp(val, "cathode") && strcmp(val, "anode"))
+			return -1;
+		cfg.led_anode = !strcmp(val, "anode");
+	} else {
 		return -1;
+	}
 	return 0;
 }
 

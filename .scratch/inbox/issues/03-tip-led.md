@@ -1,6 +1,6 @@
 # Tip LED: wire it and finish step 8 (scara led, M3/M5)
 
-Status: ready-for-human
+Status: ready-for-human (implemented, waiting for the board test)
 Category: enhancement
 
 Step 8 of `docs/plan.md` was skipped on 2026-10-11: the code was written,
@@ -29,3 +29,8 @@ To do:
 4. Long-exposure photo of square.gcode with M3/M5 around the square.
 
 ## Comments
+
+**2026-10-12**: done on P8_12 (GPIO1_12) instead of P9_23: P8_12 -> 330 Ohm
+-> LED anode, cathode -> P8_2 GND. `scara led on|off`; in G-code the LED is
+on only while a G1 moves after M3 (off on G0, G28, M5, end, error, Ctrl-C,
+SIGTERM/SIGHUP). Left: test on the board and the long-exposure photo.

@@ -5,7 +5,9 @@
  *
  * Supported: G0 (rapid move), G1 (straight line at feed F, mm/min), G28
  * (home), G90 / G91 (absolute / relative), G21 (mm), M3 / M5 and the
- * aliases M106 / M107 (tool on / off), M2 / M30 (end of program).
+ * aliases M106 / M107 (tool on / off), M150 R U B [P] (tool color, Marlin
+ * style: 0-255 each, a missing one is 0, P scales all three), M2 / M30
+ * (end of program).
  * Comments ';' to the end of the line and '( )'; line numbers N and
  * RepRap checksums '*nn' are skipped, '%' lines are empty.  Z is parsed
  * and reported (the arm has no Z), S is accepted on tool lines.
@@ -25,7 +27,7 @@ struct gc_state {
 
 /*
  * One parsed line.  When several things are on a line they are meant to
- * run in this order: dist, home, feed, move, tool, end.
+ * run in this order: dist, home, feed, color, move, tool, end.
  */
 struct gc_line {
 	enum gc_dist dist;	/* G90 / G91 on this line */
@@ -35,6 +37,8 @@ struct gc_line {
 	int has_x, has_y, has_z, has_f;
 	double x, y, z;		/* mm, absolute or relative per dist */
 	double f;		/* feed, mm/min */
+	int color;		/* M150: rgb[] is the new tool color */
+	int rgb[3];		/* 0-255, already scaled by P */
 	enum gc_tool tool;
 	int end;		/* M2 / M30 */
 };

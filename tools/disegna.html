@@ -1,0 +1,1287 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>body{margin:0}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>OpenSCARA Disegno</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Saira+Condensed:wght@600;700&display=swap">
+<style>
+/* Layout: drafting table. Canvas fills the left, a narrow instrument panel on the right (below on phones). */
+:root {
+  --paper: #e9eef1;
+  --surface: #f7f9fa;
+  --ink: #16202a;
+  --muted: #586572;
+  --line: #c9d2da;
+  --grid: #d3dbe2;
+  --grid-major: #b7c3cd;
+  --ws-both: #8fd3c4;
+  --ws-one: #cdeae3;
+  --led: #d9480f;
+  --travel: #7d8a96;
+  --bad: #c92a2a;
+  --ok: #2b8a3e;
+  --arm: #34495c;
+  --btn: #ffffff;
+  --btn-on: #16202a;
+  --btn-on-ink: #f7f9fa;
+  --halo: rgba(22, 32, 42, .45);
+  --font-display: "Saira Condensed", "Arial Narrow", sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0c1116; --surface: #131a21; --ink: #e2e8ee; --muted: #8b98a5;
+    --line: #25303b; --grid: #18212a; --grid-major: #263340;
+    --ws-both: #1d4a44; --ws-one: #15302d; --led: #ffb020; --travel: #66737f;
+    --bad: #ff6b6b; --ok: #51cf66; --arm: #a9b8c6;
+    --btn: #18212a; --btn-on: #e2e8ee; --btn-on-ink: #0c1116; --halo: rgba(226, 232, 238, .35);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0c1116; --surface: #131a21; --ink: #e2e8ee; --muted: #8b98a5;
+  --line: #25303b; --grid: #18212a; --grid-major: #263340;
+  --ws-both: #1d4a44; --ws-one: #15302d; --led: #ffb020; --travel: #66737f;
+  --bad: #ff6b6b; --ok: #51cf66; --arm: #a9b8c6;
+  --btn: #18212a; --btn-on: #e2e8ee; --btn-on-ink: #0c1116; --halo: rgba(226, 232, 238, .35);
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body {
+  background: var(--paper); color: var(--ink);
+  font-family: var(--font-body); font-size: 14px; line-height: 1.45;
+}
+.app {
+  display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 12px;
+  height: 100%; box-sizing: border-box; padding: 12px 16px;
+}
+header { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+h1 {
+  font-family: var(--font-display); font-weight: 700; font-size: 26px; letter-spacing: .02em;
+  margin: 0; text-transform: uppercase; line-height: 1;
+}
+h1 span { color: var(--led); }
+.sub { color: var(--muted); font-size: 13px; }
+.stage { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
+.toolbar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.group { display: flex; flex-wrap: wrap; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+button, .filebtn {
+  font: 500 13px/1 var(--font-body); color: var(--ink); background: var(--btn);
+  border: 1px solid transparent; border-radius: 6px; padding: 8px 10px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+}
+.group button { background: transparent; }
+button:hover, .filebtn:hover { border-color: var(--line); }
+button:focus-visible, .filebtn:focus-within, input:focus-visible, select:focus-visible { outline: 2px solid var(--led); outline-offset: 1px; }
+button[aria-pressed="true"] { background: var(--btn-on); color: var(--btn-on-ink); }
+button:disabled { opacity: .4; cursor: default; }
+button.primary { background: var(--led); color: #fff; }
+:root[data-theme="dark"] button.primary { color: #111; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) button.primary { color: #111; } }
+button.danger[data-armed="true"] { background: var(--bad); color: #fff; }
+.board {
+  position: relative; flex: 1; min-height: 360px; border: 1px solid var(--line);
+  border-radius: 10px; overflow: hidden; background: var(--paper);
+}
+canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+.readout {
+  position: absolute; left: 8px; bottom: 8px; right: 8px; pointer-events: none;
+  font: 12px/1.4 var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums;
+  display: flex; gap: 12px; flex-wrap: wrap;
+}
+.readout b { color: var(--ink); font-weight: 500; }
+.hint {
+  position: absolute; top: 8px; left: 8px; right: 8px; pointer-events: none;
+  font-size: 12px; color: var(--muted);
+}
+aside { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; }
+section.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+h2 {
+  font: 600 11px/1 var(--font-body); text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); margin: 0;
+}
+.status { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.chip { font: 600 11px/1 var(--font-mono); padding: 4px 7px; border-radius: 99px; color: #fff; background: var(--ok); }
+.chip.bad { background: var(--bad); }
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; margin: 0; }
+.stats div { display: flex; flex-direction: column; }
+.stats dt { font-size: 11px; color: var(--muted); }
+.stats dd { margin: 0; font: 500 15px/1.2 var(--font-mono); font-variant-numeric: tabular-nums; }
+.errors { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.errors li { border-left: 3px solid var(--bad); padding-left: 8px; }
+.errors li.warn { border-left-color: var(--travel); color: var(--muted); }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+label.inline { flex-direction: row; align-items: center; gap: 6px; color: var(--ink); font-size: 13px; }
+input[type="text"], input[type="number"], select {
+  font: 14px var(--font-mono); color: var(--ink); background: var(--paper);
+  border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; width: 100%; box-sizing: border-box;
+}
+.fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+textarea {
+  width: 100%; box-sizing: border-box; height: 160px; resize: vertical;
+  font: 12px/1.4 var(--font-mono); color: var(--ink); background: var(--paper);
+  border: 1px solid var(--line); border-radius: 6px; padding: 8px;
+}
+details summary { cursor: pointer; font-size: 13px; }
+.legend { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.legend span { display: inline-block; width: 14px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 6px; border: 1px solid var(--line); }
+.note { font-size: 12px; color: var(--muted); margin: 0; }
+.toast { min-height: 1.2em; font-size: 12px; color: var(--ok); }
+.group.colors { align-items: center; gap: 4px; padding: 3px 6px; }
+.swatch {
+  width: 26px; height: 26px; padding: 0; border-radius: 50%; border: 1px solid var(--line);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.15);
+}
+.group .swatch { background: var(--c); }
+.swatch[aria-pressed="true"] { background: var(--c); outline: 2px solid var(--ink); outline-offset: 2px; }
+.custom { position: relative; width: 26px; height: 26px; border-radius: 50%; overflow: hidden; border: 1px dashed var(--muted); cursor: pointer; }
+.custom[aria-pressed="true"] { outline: 2px solid var(--ink); outline-offset: 2px; border-style: solid; }
+.custom input { position: absolute; inset: -8px; width: 44px; height: 44px; border: 0; padding: 0; cursor: pointer; opacity: 0; }
+.custom span { position: absolute; inset: 0; display: grid; place-items: center; font: 600 15px/1 var(--font-body); color: var(--muted); pointer-events: none; }
+.custom[aria-pressed="true"] span { color: transparent; }
+input[type="file"] { display: none; }
+.progress { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.progress div { height: 100%; width: 0; background: var(--ok); transition: width .2s; }
+.rlog { margin: 0; max-height: 160px; overflow: auto; font: 11px/1.4 var(--font-mono); color: var(--muted); white-space: pre-wrap; }
+#rstatus b { color: var(--ink); font-weight: 600; }
+@media (max-width: 860px) {
+  .app { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .board { flex: none; height: 62vh; min-height: 320px; }
+  aside { overflow: visible; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="app">
+  <header>
+    <h1>Open<span>SCARA</span> disegno</h1>
+    <div class="sub">Disegna dentro l'area raggiungibile, poi salva il G-code per <code>scara gcode</code>.</div>
+  </header>
+
+  <div class="stage">
+    <div class="toolbar">
+      <div class="group" role="toolbar" aria-label="Strumenti">
+        <button data-tool="free" aria-pressed="true" title="Mano libera (F)">Mano libera</button>
+        <button data-tool="line" aria-pressed="false" title="Linea (L)">Linea</button>
+        <button data-tool="poly" aria-pressed="false" title="Spezzata: tocca i punti, doppio tocco o Invio per finire (P)">Spezzata</button>
+        <button data-tool="rect" aria-pressed="false" title="Rettangolo (R)">Rettangolo</button>
+        <button data-tool="circle" aria-pressed="false" title="Cerchio dal centro (C)">Cerchio</button>
+        <button data-tool="paint" aria-pressed="false" title="Colora: tocca un tratto per dargli il colore scelto (T)">Colora</button>
+        <button data-tool="erase" aria-pressed="false" title="Gomma: tocca un tratto (E)">Gomma</button>
+        <button data-tool="pan" aria-pressed="false" title="Sposta la vista (spazio)">Sposta vista</button>
+      </div>
+      <div class="group colors" role="radiogroup" aria-label="Colore del LED" id="palette">
+        <label class="custom" title="Colore a scelta" id="customwrap"><input type="color" id="custom" value="#ff8800" aria-label="Colore a scelta"><span>+</span></label>
+      </div>
+      <div class="group">
+        <button id="undo" title="Annulla (Ctrl+Z)">Annulla</button>
+        <button id="redo" title="Ripeti (Ctrl+Y)">Ripeti</button>
+        <button id="clear" class="danger" title="Cancella tutto il disegno">Svuota</button>
+      </div>
+      <div class="group">
+        <button id="zout" title="Zoom indietro">−</button>
+        <button id="zin" title="Zoom avanti">+</button>
+        <button id="fit" title="Mostra tutta l'area">Adatta</button>
+        <button id="rot" aria-pressed="false" title="Ruota la vista: braccio verso l'alto">Braccio in alto</button>
+        <button id="snap" aria-pressed="false" title="Aggancia linee e forme alla griglia di 5 mm">Griglia 5 mm</button>
+      </div>
+      <button id="play" class="primary" title="Guarda il braccio eseguire il disegno">▶ Simula</button>
+      <select id="speed" aria-label="Velocità della simulazione" style="width:auto">
+        <option value="1">1×</option><option value="3" selected>3×</option><option value="10">10×</option>
+      </select>
+    </div>
+    <div class="board" id="board">
+      <canvas id="cv"></canvas>
+      <div class="hint" id="hint"></div>
+      <div class="readout" id="readout"></div>
+    </div>
+  </div>
+
+  <aside>
+    <section class="card" aria-live="polite">
+      <h2>Verifica</h2>
+      <div class="status" id="status"></div>
+      <dl class="stats" id="stats"></dl>
+      <ul class="errors" id="errors"></ul>
+      <p class="note">Stessi controlli di <code>scara gcode -n</code>: portata, limiti dei giunti e linee che passano troppo vicino alla spalla. Ogni tratto resta su un lato del gomito.</p>
+    </section>
+
+    <section class="card">
+      <h2>G-code</h2>
+      <div class="fields">
+        <label for="fname">Nome file<input type="text" id="fname" value="disegno"></label>
+        <label for="feed">Velocità F (mm/min)<input type="number" id="feed" value="1200" min="60" max="20000" step="60"></label>
+      </div>
+      <label class="inline" for="m3"><input type="checkbox" id="m3" checked> M3/M5 attorno a ogni tratto e M150 quando cambia colore (LED)</label>
+      <label class="inline" for="showtravel"><input type="checkbox" id="showtravel" checked> Mostra gli spostamenti G0</label>
+      <div class="row">
+        <button id="save" class="primary">Salva .gcode</button>
+        <button id="copy">Copia</button>
+        <label class="filebtn" for="load">Apri .gcode<input type="file" id="load" accept=".gcode,.nc,.txt,text/plain"></label>
+      </div>
+      <div class="toast" id="toast"></div>
+      <details>
+        <summary>Anteprima del file</summary>
+        <textarea id="out" readonly spellcheck="false" aria-label="G-code generato"></textarea>
+      </details>
+    </section>
+
+    <section class="card" aria-live="polite">
+      <h2>Robot (cavo USB)</h2>
+      <div class="row">
+        <button id="connect" title="Scegli la porta della BeagleBone (di solito ttyACM0)">Collega</button>
+        <button id="run" class="primary" disabled title="Copia il disegno sulla scheda ed eseguilo con scara gcode">▶ Disegna sul robot</button>
+        <button id="stop" disabled title="Ferma il braccio (come Ctrl-C)">■ Ferma</button>
+      </div>
+      <div class="progress" aria-hidden="true"><div id="bar"></div></div>
+      <p class="note" id="rstatus"></p>
+      <details>
+        <summary>Uscita della scheda</summary>
+        <pre class="rlog" id="rlog"></pre>
+      </details>
+    </section>
+
+    <section class="card">
+      <h2>Legenda</h2>
+      <div class="legend">
+        <div><span style="background:var(--ws-both)"></span>Raggiungibile con il gomito da entrambi i lati</div>
+        <div><span style="background:var(--ws-one)"></span>Raggiungibile da un solo lato del gomito</div>
+        <div><span style="background:linear-gradient(90deg,#ff0000,#ffff00,#00ff00,#00ffff,#0000ff,#ff00ff)"></span>Tratto disegnato, nel colore del LED</div>
+        <div><span style="background:var(--bad)"></span>Tratto che il braccio non può fare</div>
+      </div>
+      <p class="note">Il rosso del LED (P8_12) è solo acceso o spento: ogni R sopra 0 diventa rosso pieno. Verde e blu hanno 256 livelli.</p>
+      <details>
+        <summary>Parametri del braccio</summary>
+        <p class="note">Valori di <code>/etc/tmc2209.conf</code>. Cambiali qui se ricalibri.</p>
+        <div class="fields">
+          <label for="l1">L1 mm<input type="number" id="l1" step="0.1"></label>
+          <label for="l2">L2 mm<input type="number" id="l2" step="0.1"></label>
+          <label for="min1">Spalla min °<input type="number" id="min1" step="0.25"></label>
+          <label for="max1">Spalla max °<input type="number" id="max1" step="0.25"></label>
+          <label for="min2">Gomito min °<input type="number" id="min2" step="0.25"></label>
+          <label for="max2">Gomito max °<input type="number" id="max2" step="0.25"></label>
+          <label for="h1">Home spalla °<input type="number" id="h1" step="0.25"></label>
+          <label for="h2">Home gomito °<input type="number" id="h2" step="0.25"></label>
+          <label for="maxy">Y massima (tavolo) mm<input type="number" id="maxy" step="1"></label>
+        </div>
+        <div class="row" style="margin-top:8px"><button id="resetp">Ripristina valori</button></div>
+      </details>
+    </section>
+  </aside>
+</div>
+
+<script>
+(() => {
+"use strict";
+
+/* ---------- arm model: a port of kinematics.c and line.c ---------- */
+const DEFAULTS = { l1: 195.4, l2: 166.4, min: [-109.25, -171], max: [111.75, 166], home: [116.75, 171], maxY: 0 };
+let P = JSON.parse(JSON.stringify(DEFAULTS));
+const DEG = Math.PI / 180, COS_EPS = 1e-9, LIM_EPS = 1e-6;
+const LINE_SEG_MM = 1, LINE_JUMP_DEG = 10, MIN_MOVE_MM = 0.01;
+const JOINT_DEG_S = [360 * 20 / 72, 360 * 20 / 45];   /* 60 motor rpm through 20T->72T / 20T->45T */
+
+function fk(th) {
+  const t1 = th[0] * DEG, t12 = (th[0] + th[1]) * DEG;
+  return [P.l1 * Math.cos(t1) + P.l2 * Math.cos(t12), P.l1 * Math.sin(t1) + P.l2 * Math.sin(t12)];
+}
+function fit(t, min, max) {
+  for (let k = -1; k <= 1; k++) {
+    const v = t + 360 * k;
+    if (v >= min - LIM_EPS && v <= max + LIM_EPS) return Math.max(min, Math.min(max, v));
+  }
+  return null;
+}
+function solve(x, y, c2, sign) {
+  const s2 = sign * Math.sqrt(1 - c2 * c2);
+  const t2 = Math.atan2(s2, c2) / DEG;
+  let t1 = (Math.atan2(y, x) - Math.atan2(P.l2 * s2, P.l1 + P.l2 * c2)) / DEG;
+  if (t1 <= -180) t1 += 360; else if (t1 > 180) t1 -= 360;
+  const a = fit(t1, P.min[0], P.max[0]);
+  if (a === null) return null;
+  const b = fit(t2, P.min[1], P.max[1]);
+  return b === null ? null : [a, b];
+}
+function cosElbow(x, y) { return (x * x + y * y - P.l1 * P.l1 - P.l2 * P.l2) / (2 * P.l1 * P.l2); }
+/* elbow: 0 any, 1 positive, -1 negative. Returns {r, th} */
+function ik(x, y, elbow, near) {
+  if (y > P.maxY + 1e-6) return { r: "table" };
+  let c2 = cosElbow(x, y);
+  if (c2 > 1 + COS_EPS) return { r: "far" };
+  if (c2 < -1 - COS_EPS) return { r: "close" };
+  c2 = Math.max(-1, Math.min(1, c2));
+  const pos = elbow !== -1 ? solve(x, y, c2, 1) : null;
+  const neg = elbow !== 1 ? solve(x, y, c2, -1) : null;
+  const dist = th => Math.abs(th[0] - near[0]) + Math.abs(th[1] - near[1]);
+  if (pos && neg && near && dist(neg) < dist(pos)) return { r: "ok", th: neg };
+  if (pos) return { r: "ok", th: pos };
+  if (neg) return { r: "ok", th: neg };
+  return { r: "limits" };
+}
+/* line_plan(): the tip from joint angles start to (x, y), 1 mm steps, elbow kept on its side */
+function linePlan(start, x, y) {
+  const side = start[1] < 0 ? -1 : 1;
+  const [x0, y0] = fk(start);
+  const len = Math.hypot(x - x0, y - y0);
+  const npts = Math.max(1, Math.ceil(len / LINE_SEG_MM - 1e-9)) + 1;
+  const pts = [start];
+  for (let i = 1; i < npts; i++) {
+    const t = i / (npts - 1);
+    const px = i === npts - 1 ? x : x0 + (x - x0) * t, py = i === npts - 1 ? y : y0 + (y - y0) * t;
+    const s = ik(px, py, side, null);
+    let r = s.r;
+    if (r === "ok" && (Math.abs(s.th[0] - pts[i - 1][0]) > LINE_JUMP_DEG || Math.abs(s.th[1] - pts[i - 1][1]) > LINE_JUMP_DEG)) r = "jump";
+    if (r !== "ok") return { r, bad: [px, py] };
+    pts.push(s.th);
+  }
+  return { r: "ok", pts };
+}
+const WHY = {
+  far: "troppo lontano dalla spalla",
+  close: "troppo vicino alla spalla",
+  limits: "fuori dai limiti dei giunti",
+  jump: "la linea passa troppo vicino alla spalla",
+  table: "oltre l'asse X, verso il tavolo",
+};
+/* kin_joint_move(): a joint move swings the tip along a curve; its first point past the table edge, or null.
+   Within TABLE_FREE_R of the shoulder (the folded tip, as at home) it may cross. */
+const TABLE_FREE_R = 60;
+function jointCross(a, b) {
+  const n = Math.max(1, Math.ceil(Math.max(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1]))));
+  for (let i = 0; i <= n; i++) {
+    const p = fk([a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n]);
+    if (p[1] > P.maxY + 1e-6 && Math.hypot(p[0], p[1]) > TABLE_FREE_R) return p;
+  }
+  return null;
+}
+/* plan_g0() in scara.c: one joint move (nearest elbow side, then the other), else shoulder first then
+   elbow, else elbow first then shoulder, else a straight line. moves: the joint targets in order */
+function planG0(th, x, y) {
+  const k = ik(x, y, 0, th);
+  if (k.r !== "ok") return { r: k.r, bad: [x, y] };
+  const sols = [k.th], alt = ik(x, y, k.th[1] < 0 ? 1 : -1, null);
+  if (alt.r === "ok") sols.push(alt.th);
+  for (const s of sols) if (!jointCross(th, s)) return { r: "ok", th: s, moves: [s] };
+  for (const k2 of [0, 1]) for (const s of sols) {
+    /* the joint that waits is brought inside its limits: home (elbow 171) is past max (166) */
+    const lim = (j, t) => Math.max(P.min[j], Math.min(P.max[j], t));
+    const v = k2 ? [lim(0, th[0]), s[1]] : [s[0], lim(1, th[1])];
+    if (!jointCross(th, v) && !jointCross(v, s)) return { r: "ok", th: s, moves: [v, s] };
+  }
+  const lp = linePlan(th, x, y);
+  if (lp.r === "ok") return { r: "ok", th: lp.pts[lp.pts.length - 1], line: lp.pts };
+  return { r: "table", bad: jointCross(th, k.th) };
+}
+
+/* ---------- drawing state ---------- */
+const SAMPLE = (() => {
+  const s = [];
+  const star = [];
+  for (let k = 0; k <= 10; k++) {
+    const a = (90 + k * 36) * DEG, r = k % 2 ? 26 : 62;
+    star.push([200 + r * Math.cos(a), -90 - r * Math.sin(a)]);
+  }
+  s.push({ kind: "poly", pts: star, color: "#ffff00" });
+  s.push({ kind: "circle", pts: circlePts(200, -90, 75), color: "#00ffff" });
+  return s;
+})();
+/* LED colours: the same names as "scara led NAME" */
+const PALETTE = [
+  ["#ff0000", "rosso"], ["#ff4000", "arancione"], ["#ffff00", "giallo"], ["#00ff00", "verde"],
+  ["#00ffff", "ciano"], ["#0000ff", "blu"], ["#ff00a0", "viola"], ["#ff00ff", "magenta"], ["#ffffff", "bianco"],
+];
+const DEFAULT_COLOR = "#ff0000";
+let color = DEFAULT_COLOR;
+let strokes = [];
+let undoStack = [], redoStack = [];
+let isSample = false;
+let tool = "free", snap = false, rot = 0;
+let view = { s: 1, cu: 120, cv: 90 };   /* display coords: v = -y */
+let draft = null;
+let hover = null;
+let sim = null;
+let anim = null;
+
+function circlePts(cx, cy, r) {
+  const n = Math.max(36, Math.ceil(2 * Math.PI * r / 2));
+  const out = [];
+  for (let k = 0; k <= n; k++) { const a = 2 * Math.PI * k / n; out.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]); }
+  return out;
+}
+
+/* ---------- persistence (per browser only) ---------- */
+function store() {
+  try {
+    localStorage.setItem("openscara-disegno", JSON.stringify({
+      strokes, isSample, P, color, feed: $("feed").value, m3: $("m3").checked, fname: $("fname").value, rot, snap,
+    }));
+  } catch (e) { /* storage blocked: fine */ }
+}
+function restore() {
+  try {
+    const d = JSON.parse(localStorage.getItem("openscara-disegno") || "null");
+    if (!d) return false;
+    strokes = (d.strokes || []).map(s => s.color ? s : Object.assign(s, { color: DEFAULT_COLOR }));
+    isSample = !!d.isSample;
+    if (isSample) strokes = JSON.parse(JSON.stringify(SAMPLE));
+    if (/^#[0-9a-f]{6}$/i.test(d.color || "")) color = d.color.toLowerCase();
+    if (d.P) P = Object.assign(JSON.parse(JSON.stringify(DEFAULTS)), d.P);
+    if (d.feed) $("feed").value = d.feed;
+    if (typeof d.m3 === "boolean") $("m3").checked = d.m3;
+    if (d.fname) $("fname").value = d.fname;
+    rot = d.rot || 0; snap = !!d.snap;
+    return true;
+  } catch (e) { return false; }
+}
+
+/* ---------- view transform: world mm <-> screen px ---------- */
+const $ = id => document.getElementById(id);
+const cv = $("cv"), ctx = cv.getContext("2d");
+let W = 0, H = 0, DPR = 1, fitted = false;
+/* The screen shows the arm as it stands: the table (+Y) at the bottom, so robot -Y is up */
+function toDisp(x, y) { return rot ? [y, x] : [x, -y]; }
+function fromDisp(u, v) { return rot ? [v, u] : [u, -v]; }
+function w2s(x, y) { const [u, v] = toDisp(x, y); return [W / 2 + (u - view.cu) * view.s, H / 2 - (v - view.cv) * view.s]; }
+function s2w(sx, sy) { return fromDisp((sx - W / 2) / view.s + view.cu, -(sy - H / 2) / view.s + view.cv); }
+function fitView() {
+  const R = P.l1 + P.l2;
+  /* bounding box of the reach that matters: front half plus the shoulder's swing */
+  const box = [[-R * 0.75, -R], [R, Math.min(R, P.maxY + 40)]];
+  const corners = [[box[0][0], box[0][1]], [box[1][0], box[1][1]], [box[0][0], box[1][1]], [box[1][0], box[0][1]]].map(p => toDisp(p[0], p[1]));
+  const us = corners.map(c => c[0]), vs = corners.map(c => c[1]);
+  const du = Math.max(...us) - Math.min(...us), dv = Math.max(...vs) - Math.min(...vs);
+  view.s = Math.min((W - 24) / du, (H - 60) / dv);
+  view.cu = (Math.max(...us) + Math.min(...us)) / 2;
+  view.cv = (Math.max(...vs) + Math.min(...vs)) / 2;
+  wsCache = null;
+}
+function zoomAt(f, sx, sy) {
+  const [x, y] = s2w(sx, sy);
+  view.s = Math.max(0.2, Math.min(20, view.s * f));
+  const [u, v] = toDisp(x, y);
+  view.cu = u - (sx - W / 2) / view.s;
+  view.cv = v + (sy - H / 2) / view.s;
+  wsCache = null; draw();
+}
+
+/* ---------- colours from the CSS tokens ---------- */
+let C = {};
+function readColors() {
+  const cs = getComputedStyle(document.documentElement);
+  for (const k of ["paper", "ink", "muted", "line", "grid", "grid-major", "ws-both", "ws-one", "led", "travel", "bad", "arm", "surface", "halo"])
+    C[k] = cs.getPropertyValue("--" + k).trim();
+  wsCache = null;
+}
+function rgb(hex) { const h = hex.replace("#", ""); return [0, 2, 4].map(i => parseInt(h.substr(i, 2), 16)); }
+
+/* ---------- workspace raster: every pixel classified with the IK above ---------- */
+let wsCache = null;
+function workspaceImage() {
+  if (wsCache) return wsCache;
+  const w = Math.ceil(W), h = Math.ceil(H);
+  const off = document.createElement("canvas"); off.width = w; off.height = h;
+  const g = off.getContext("2d"); const img = g.createImageData(w, h); const d = img.data;
+  const both = rgb(C["ws-both"]), one = rgb(C["ws-one"]);
+  for (let py = 0; py < h; py++) {
+    for (let px = 0; px < w; px++) {
+      const [x, y] = s2w(px + 0.5, py + 0.5);
+      if (y > P.maxY) continue;
+      let c2 = cosElbow(x, y);
+      if (c2 > 1 || c2 < -1) continue;
+      const a = solve(x, y, c2, 1) !== null, b = solve(x, y, c2, -1) !== null;
+      if (!a && !b) continue;
+      const col = a && b ? both : one, i = (py * w + px) * 4;
+      d[i] = col[0]; d[i + 1] = col[1]; d[i + 2] = col[2]; d[i + 3] = 255;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  wsCache = off;
+  return off;
+}
+
+/* ---------- simulation: what scara gcode -n would do, plus frames for the animation ---------- */
+function feedMmS() { return Math.max(1, +$("feed").value || 1200) / 60; }
+function simulate() {
+  const errors = [], badStroke = new Set(), sides = [];
+  const frames = [{ t: 0, th: P.home.slice(), on: false }];
+  let th = P.home.slice(), t = 0, drawLen = 0, travelLen = 0, g1 = 0;
+  const v = feedMmS();
+  let at = fk(th);
+  const travels = [];
+  strokes.forEach((s, i) => {
+    const pts = s.pts;
+    if (pts.length < 2) return;
+    /* G0 to the start: joint move, elbow side picked nearest */
+    if (Math.hypot(pts[0][0] - at[0], pts[0][1] - at[1]) >= MIN_MOVE_MM) {
+      travels.push([at, pts[0]]);
+      travelLen += Math.hypot(pts[0][0] - at[0], pts[0][1] - at[1]);
+      const k = planG0(th, pts[0][0], pts[0][1]);
+      if (k.r !== "ok") {
+        errors.push({ i, at: k.bad, msg: k.r === "table" && k.bad !== null && (k.bad[0] !== pts[0][0] || k.bad[1] !== pts[0][1]) ? `lo spostamento G0 passa ${WHY.table}` : `inizio ${WHY[k.r]}` }); badStroke.add(i);
+        at = pts[pts.length - 1];
+        const e = ik(at[0], at[1], 0, th); if (e.r === "ok") th = e.th;
+        return;
+      }
+      const jdt = (a, b) => Math.max(Math.abs(b[0] - a[0]) / JOINT_DEG_S[0], Math.abs(b[1] - a[1]) / JOINT_DEG_S[1]);
+      if (k.line) {
+        for (let q = 1; q < k.line.length; q++) { t += jdt(k.line[q - 1], k.line[q]); frames.push({ t, th: k.line[q], on: false }); }
+      } else {
+        let a = th;
+        for (const b of k.moves) {
+          const dt = jdt(a, b);
+          const n = Math.max(1, Math.ceil(Math.max(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1]))));
+          for (let j = 1; j <= n; j++) frames.push({ t: t + dt * j / n, th: [a[0] + (b[0] - a[0]) * j / n, a[1] + (b[1] - a[1]) * j / n], on: false });
+          t += dt; a = b;
+        }
+      }
+      th = k.th; at = pts[0];
+    }
+    sides[i] = th[1] < 0 ? "−" : "+";
+    for (let j = 1; j < pts.length; j++) {
+      const p = pts[j];
+      const len = Math.hypot(p[0] - at[0], p[1] - at[1]);
+      if (len < MIN_MOVE_MM) continue;
+      const lp = linePlan(th, p[0], p[1]);
+      if (lp.r !== "ok") {
+        errors.push({ i, at: lp.bad, msg: WHY[lp.r] }); badStroke.add(i);
+        at = pts[pts.length - 1];
+        const e = ik(at[0], at[1], 0, th); if (e.r === "ok") th = e.th;
+        return;
+      }
+      g1++; drawLen += len;
+      const seg = len / (lp.pts.length - 1) / v;
+      for (let q = 1; q < lp.pts.length; q++) { t += seg; frames.push({ t, th: lp.pts[q], on: true, col: s.color }); }
+      th = lp.pts[lp.pts.length - 1]; at = p;
+    }
+  });
+  return { errors, badStroke, sides, frames, time: t, drawLen, travelLen, g1, travels };
+}
+
+/* ---------- G-code ---------- */
+const f2 = n => (Math.abs(n) < 0.005 ? 0 : n).toFixed(2);
+function m150(hex) { const [r, g, b] = rgb(hex); return `M150 R${r} U${g} B${b}`; }
+function gcode() {
+  const feed = Math.round(+$("feed").value || 1200), m3 = $("m3").checked;
+  const out = ["; OpenSCARA - disegnato con tools/disegna.html", `; ${strokes.length} tratti, F${feed} mm/min`, "G21 G90", "G28"];
+  let lastColor = null;
+  strokes.forEach((s, i) => {
+    if (s.pts.length < 2) return;
+    out.push(`; tratto ${i + 1}`);
+    out.push(`G0 X${f2(s.pts[0][0])} Y${f2(s.pts[0][1])}`);
+    if (m3 && s.color !== lastColor) { out.push(m150(s.color)); lastColor = s.color; }
+    if (m3) out.push("M3");
+    let first = true, last = s.pts[0];
+    for (let j = 1; j < s.pts.length; j++) {
+      const p = s.pts[j];
+      if (f2(p[0]) === f2(last[0]) && f2(p[1]) === f2(last[1])) continue;
+      out.push(`G1 X${f2(p[0])} Y${f2(p[1])}` + (first ? ` F${feed}` : ""));
+      first = false; last = p;
+    }
+    if (m3) out.push("M5");
+  });
+  out.push("M2");
+  return out.join("\n") + "\n";
+}
+function parseGcode(text) {
+  let rel = false, pos = fk(P.home), cur = null, feed = null, mode = null, col = DEFAULT_COLOR;
+  const res = [];
+  const flush = () => { if (cur && cur.length > 1) res.push({ kind: "import", pts: cur, color: col }); cur = null; };
+  const hex = v => Math.max(0, Math.min(255, Math.round(v || 0))).toString(16).padStart(2, "0");
+  for (let raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/;.*$/, "").replace(/\(.*?\)/g, "").toUpperCase();
+    const words = {}; const gs = [];
+    for (const m of line.matchAll(/([A-Z])\s*([-+]?\d*\.?\d+)/g)) {
+      if (m[1] === "G") gs.push(+m[2]); else words[m[1]] = +m[2];
+    }
+    if (words.M === 150) {
+      flush();
+      const k = "P" in words ? words.P / 255 : 1;
+      col = "#" + hex(words.R * k) + hex(words.U * k) + hex(words.B * k);
+    }
+    if (gs.includes(90)) rel = false;
+    if (gs.includes(91)) rel = true;
+    if (gs.includes(28)) { flush(); pos = fk(P.home); }
+    if (words.F && feed === null) feed = words.F;
+    if (gs.includes(1)) mode = 1; else if (gs.includes(0)) mode = 0;
+    const motion = mode;
+    if (motion === null || (!("X" in words) && !("Y" in words))) continue;
+    const x = "X" in words ? words.X + (rel ? pos[0] : 0) : pos[0];
+    const y = "Y" in words ? words.Y + (rel ? pos[1] : 0) : pos[1];
+    if (motion === 0) { flush(); }
+    else { if (!cur) cur = [pos.slice()]; cur.push([x, y]); }
+    pos = [x, y];
+  }
+  flush();
+  return { strokes: res, feed };
+}
+
+/* ---------- freehand clean-up ---------- */
+function smooth(pts) {
+  if (pts.length < 3) return pts;
+  const out = [pts[0]];
+  for (let i = 1; i < pts.length - 1; i++)
+    out.push([(pts[i - 1][0] + 2 * pts[i][0] + pts[i + 1][0]) / 4, (pts[i - 1][1] + 2 * pts[i][1] + pts[i + 1][1]) / 4]);
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+function rdp(pts, eps) {
+  if (pts.length < 3) return pts;
+  const [a, b] = [pts[0], pts[pts.length - 1]];
+  const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1e-9;
+  let best = -1, bi = 0;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const d = Math.abs(dy * (pts[i][0] - a[0]) - dx * (pts[i][1] - a[1])) / L;
+    if (d > best) { best = d; bi = i; }
+  }
+  if (best <= eps) return [a, b];
+  return rdp(pts.slice(0, bi + 1), eps).slice(0, -1).concat(rdp(pts.slice(bi), eps));
+}
+
+/* ---------- editing ---------- */
+function commit(next) {
+  undoStack.push(JSON.stringify(strokes)); if (undoStack.length > 200) undoStack.shift();
+  redoStack = []; strokes = next; isSample = false; changed();
+}
+function changed() { stopAnim(); sim = simulate(); updatePanel(); store(); draw(); }
+function snapP(p) { return snap ? [Math.round(p[0] / 5) * 5, Math.round(p[1] / 5) * 5] : p; }
+
+/* ---------- rendering ---------- */
+function resize() {
+  const r = $("board").getBoundingClientRect();
+  DPR = window.devicePixelRatio || 1;
+  W = r.width; H = r.height;
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  /* fit once the board has a real size (the first callback can be tiny) */
+  if (!fitted && W > 100 && H > 100) { fitView(); fitted = true; }
+  if (!fitted) return;
+  wsCache = null; draw();
+}
+function path(pts) {
+  ctx.beginPath();
+  pts.forEach((p, i) => { const [sx, sy] = w2s(p[0], p[1]); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); });
+}
+function drawGrid() {
+  const [x0, y0] = s2w(0, 0), [x1, y1] = s2w(W, H);
+  const xs = [Math.min(x0, x1), Math.max(x0, x1)], ys = [Math.min(y0, y1), Math.max(y0, y1)];
+  const step = view.s > 2 ? 10 : 50;
+  ctx.lineWidth = 1;
+  for (const axis of [0, 1]) {
+    const [lo, hi] = axis ? ys : xs;
+    for (let g = Math.ceil(lo / step) * step; g <= hi; g += step) {
+      ctx.strokeStyle = g % 50 === 0 ? C["grid-major"] : C.grid;
+      ctx.beginPath();
+      const a = axis ? w2s(xs[0], g) : w2s(g, ys[0]), b = axis ? w2s(xs[1], g) : w2s(g, ys[1]);
+      ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+    }
+  }
+}
+function drawArm(th, alpha) {
+  const e = [P.l1 * Math.cos(th[0] * DEG), P.l1 * Math.sin(th[0] * DEG)], t = fk(th);
+  const o = w2s(0, 0), es = w2s(e[0], e[1]), ts = w2s(t[0], t[1]);
+  ctx.save(); ctx.globalAlpha = alpha; ctx.lineCap = "round";
+  ctx.strokeStyle = C.arm; ctx.lineWidth = Math.max(6, 22 * view.s);
+  ctx.beginPath(); ctx.moveTo(o[0], o[1]); ctx.lineTo(es[0], es[1]); ctx.stroke();
+  ctx.lineWidth = Math.max(4, 14 * view.s);
+  ctx.beginPath(); ctx.moveTo(es[0], es[1]); ctx.lineTo(ts[0], ts[1]); ctx.stroke();
+  ctx.fillStyle = C.paper;
+  for (const p of [o, es]) { ctx.beginPath(); ctx.arc(p[0], p[1], Math.max(2.5, 5 * view.s), 0, 7); ctx.fill(); }
+  ctx.restore();
+}
+function draw() {
+  if (!W) return;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = C.paper; ctx.fillRect(0, 0, W, H);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(workspaceImage(), 0, 0, W, H);
+  drawGrid();
+
+  /* shoulder limits as rays, the max reach as a circle */
+  const R = P.l1 + P.l2, o = w2s(0, 0);
+  ctx.save(); ctx.setLineDash([6, 5]); ctx.strokeStyle = C.muted; ctx.lineWidth = 1;
+  for (const a of [P.min[0], P.max[0]]) {
+    const p = w2s(R * Math.cos(a * DEG), R * Math.sin(a * DEG));
+    ctx.beginPath(); ctx.moveTo(o[0], o[1]); ctx.lineTo(p[0], p[1]); ctx.stroke();
+  }
+  ctx.beginPath(); ctx.arc(o[0], o[1], R * view.s, 0, 7); ctx.stroke();
+  ctx.restore();
+  ctx.font = "11px " + getComputedStyle(document.body).getPropertyValue("--font-mono");
+  ctx.fillStyle = C.muted;
+  for (const a of [P.min[0], P.max[0]]) {
+    const p = w2s((R + 10) * Math.cos(a * DEG), (R + 10) * Math.sin(a * DEG));
+    const label = `spalla ${a}°`, tw = ctx.measureText(label).width;
+    ctx.fillText(label, p[0] < o[0] ? p[0] - tw - 4 : p[0] + 4, p[1] + (p[1] < o[1] ? -2 : 10));
+  }
+  /* the table: the tip stays at y <= maxY */
+  {
+    const a = w2s(-R - 20, P.maxY), b = w2s(R + 20, P.maxY);
+    ctx.save(); ctx.strokeStyle = C.bad; ctx.lineWidth = 1.5; ctx.setLineDash([8, 4]);
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); ctx.restore();
+    ctx.fillStyle = C.bad; const lp = w2s(-R * 0.7, P.maxY);
+    ctx.fillText("limite della punta (tavolo sotto)", lp[0] + 4, lp[1] + (rot ? -4 : 13));
+    ctx.fillStyle = C.muted;
+  }
+  /* X axis and origin */
+  ctx.strokeStyle = C.muted; ctx.lineWidth = 1;
+  const xa = w2s(R + 20, 0);
+  ctx.beginPath(); ctx.moveTo(o[0], o[1]); ctx.lineTo(xa[0], xa[1]); ctx.stroke();
+  ctx.fillText("+X", xa[0] + 4, xa[1] + 4);
+  const ya = w2s(0, -60);
+  ctx.beginPath(); ctx.moveTo(o[0], o[1]); ctx.lineTo(ya[0], ya[1]); ctx.stroke();
+  ctx.fillText("−Y", ya[0] + 4, ya[1]);
+
+  /* travel moves */
+  if (sim && $("showtravel").checked) {
+    ctx.save(); ctx.setLineDash([2, 4]); ctx.strokeStyle = C.travel; ctx.lineWidth = 1;
+    for (const t of sim.travels) { path(t); ctx.stroke(); }
+    ctx.restore();
+  }
+  /* strokes */
+  const dark = C.paper && rgb(C.paper).reduce((a, b) => a + b) < 200;
+  ctx.lineJoin = "round"; ctx.lineCap = "round";
+  strokes.forEach((s, i) => {
+    const bad = sim && sim.badStroke.has(i), col = bad ? C.bad : s.color;
+    if (anim) ctx.globalAlpha = 0.25;
+    /* a thin outline under the colour keeps white on paper and blue on black visible */
+    if (!bad) { ctx.strokeStyle = C.halo; ctx.lineWidth = 4.4; path(s.pts); ctx.stroke(); }
+    ctx.strokeStyle = col; ctx.lineWidth = 2.2;
+    if (dark && !bad) { ctx.shadowColor = col; ctx.shadowBlur = 8; }
+    path(s.pts); ctx.stroke();
+    ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+    const p = w2s(s.pts[0][0], s.pts[0][1]);
+    ctx.fillStyle = col; ctx.beginPath(); ctx.arc(p[0], p[1], 2.5, 0, 7); ctx.fill();
+  });
+  if (sim) for (const e of sim.errors) {
+    const [sx, sy] = w2s(e.at[0], e.at[1]);
+    ctx.strokeStyle = C.bad; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(sx - 6, sy - 6); ctx.lineTo(sx + 6, sy + 6); ctx.moveTo(sx + 6, sy - 6); ctx.lineTo(sx - 6, sy + 6); ctx.stroke();
+  }
+  /* draft */
+  if (draft) {
+    const pts = draftPts();
+    if (pts && pts.length > 1) {
+      ctx.strokeStyle = C.halo; ctx.lineWidth = 4; path(pts); ctx.stroke();
+      ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.setLineDash(draft.kind === "poly" ? [] : [5, 4]);
+      if (draft.kind === "free") ctx.setLineDash([]);
+      path(pts); ctx.stroke(); ctx.setLineDash([]);
+    }
+  }
+  /* animation trail and arm */
+  if (anim) {
+    ctx.lineWidth = 2.6;
+    let pen = false, cur = null;
+    const flushTrail = () => {
+      if (!cur) return;
+      ctx.strokeStyle = cur; if (dark) { ctx.shadowColor = cur; ctx.shadowBlur = 12; }
+      ctx.stroke(); ctx.shadowBlur = 0;
+    };
+    ctx.beginPath();
+    for (let k = 1; k <= anim.k; k++) {
+      const f = sim.frames[k];
+      const p = w2s(...fk(f.th));
+      if (f.on && pen) {
+        if (f.col !== cur) {
+          const q = w2s(...fk(sim.frames[k - 1].th));
+          flushTrail(); cur = f.col; ctx.beginPath(); ctx.moveTo(q[0], q[1]);
+        }
+        ctx.lineTo(p[0], p[1]);
+      } else ctx.moveTo(p[0], p[1]);
+      pen = true;
+    }
+    flushTrail();
+    drawArm(anim.th, 0.85);
+    const tp = w2s(...fk(anim.th));
+    ctx.fillStyle = anim.on ? anim.col : C.muted; ctx.beginPath(); ctx.arc(tp[0], tp[1], 4, 0, 7); ctx.fill();
+  } else if (hover && hover.th) {
+    drawArm(hover.th, 0.35);
+  } else {
+    drawArm(P.home, 0.25);
+  }
+  /* scale bar */
+  const bar = 50 * view.s;
+  ctx.strokeStyle = C.ink; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(W - 16 - bar, H - 34); ctx.lineTo(W - 16, H - 34); ctx.stroke();
+  ctx.fillStyle = C.ink; ctx.fillText("50 mm", W - 16 - bar, H - 40);
+}
+
+/* ---------- pointer input ---------- */
+const pointers = new Map();
+let pinch = null, panning = null, lastTap = 0;
+function evW(e) { const r = cv.getBoundingClientRect(); return { sx: e.clientX - r.left, sy: e.clientY - r.top }; }
+function draftPts() {
+  if (!draft) return null;
+  const a = draft.a, b = draft.b || draft.a;
+  switch (draft.kind) {
+    case "free": return draft.pts;
+    case "line": return [a, b];
+    case "rect": return [a, [b[0], a[1]], b, [a[0], b[1]], a];
+    case "circle": { const r = Math.hypot(b[0] - a[0], b[1] - a[1]); return r > 0.5 ? circlePts(a[0], a[1], r) : null; }
+    case "poly": return draft.pts.concat(draft.b ? [draft.b] : []);
+  }
+  return null;
+}
+function finishDraft() {
+  if (!draft) return;
+  let pts = draftPts();
+  if (draft.kind === "poly") pts = draft.pts;
+  if (draft.kind === "free" && pts) pts = rdp(smooth(pts), 0.3);
+  const k = draft.kind; draft = null;
+  if (pts && pts.length > 1 && pts.some(p => Math.hypot(p[0] - pts[0][0], p[1] - pts[0][1]) > 0.5))
+    commit(strokes.concat([{ kind: k, color, pts: pts.map(p => [+p[0].toFixed(3), +p[1].toFixed(3)]) }]));
+  else draw();
+}
+function setHover(sx, sy) {
+  const [x, y] = s2w(sx, sy);
+  const k = ik(x, y, 0, P.home);
+  const c2 = cosElbow(x, y);
+  let sides = "";
+  if (c2 >= -1 && c2 <= 1) {
+    const a = solve(x, y, c2, 1), b = solve(x, y, c2, -1);
+    sides = a && b ? "gomito + o −" : a ? "solo gomito +" : b ? "solo gomito −" : "";
+  }
+  hover = { x, y, th: k.r === "ok" ? k.th : null, r: k.r, sides };
+  const ro = $("readout");
+  ro.innerHTML = `<span>X <b>${x.toFixed(1)}</b> Y <b>${y.toFixed(1)}</b> mm</span>` +
+    (hover.th ? `<span>spalla <b>${hover.th[0].toFixed(1)}°</b> gomito <b>${hover.th[1].toFixed(1)}°</b></span><span>${sides}</span>`
+      : `<span style="color:var(--bad)">${WHY[k.r]}</span>`);
+}
+cv.addEventListener("pointerdown", e => {
+  cv.setPointerCapture(e.pointerId);
+  const p = evW(e); pointers.set(e.pointerId, p);
+  if (pointers.size === 2) {
+    if (draft && draft.kind !== "poly") draft = null;
+    const [a, b] = [...pointers.values()];
+    pinch = { d: Math.hypot(a.sx - b.sx, a.sy - b.sy), mx: (a.sx + b.sx) / 2, my: (a.sy + b.sy) / 2 };
+    panning = null; draw(); return;
+  }
+  if (pointers.size > 2) return;
+  if (anim) stopAnim();
+  if (tool === "pan" || e.button === 1 || spaceDown) { panning = { sx: p.sx, sy: p.sy, cu: view.cu, cv: view.cv }; return; }
+  const w = s2w(p.sx, p.sy);
+  if (tool === "erase") { eraseAt(p.sx, p.sy); return; }
+  if (tool === "paint") { paintAt(p.sx, p.sy); return; }
+  if (tool === "free") draft = { kind: "free", pts: [w] };
+  else if (tool === "poly") {
+    const now = performance.now(), q = snapP(w);
+    if (!draft) draft = { kind: "poly", pts: [q] };
+    else {
+      const f = w2s(...draft.pts[0]);
+      if (draft.pts.length > 2 && Math.hypot(f[0] - p.sx, f[1] - p.sy) < 12) { draft.pts.push(draft.pts[0]); finishDraft(); return; }
+      if (now - lastTap < 350) { finishDraft(); lastTap = 0; return; }
+      draft.pts.push(q);
+    }
+    lastTap = now;
+  } else draft = { kind: tool, a: snapP(w), b: null };
+  draw();
+});
+cv.addEventListener("pointermove", e => {
+  const p = evW(e);
+  if (pointers.has(e.pointerId)) pointers.set(e.pointerId, p);
+  if (pinch && pointers.size === 2) {
+    const [a, b] = [...pointers.values()];
+    const d = Math.hypot(a.sx - b.sx, a.sy - b.sy), mx = (a.sx + b.sx) / 2, my = (a.sy + b.sy) / 2;
+    view.cu -= (mx - pinch.mx) / view.s; view.cv += (my - pinch.my) / view.s;
+    pinch.mx = mx; pinch.my = my;
+    zoomAt(d / pinch.d, mx, my); pinch.d = d; return;
+  }
+  setHover(p.sx, p.sy);
+  if (panning) {
+    view.cu = panning.cu - (p.sx - panning.sx) / view.s;
+    view.cv = panning.cv + (p.sy - panning.sy) / view.s;
+    wsCache = null; draw(); return;
+  }
+  if (draft && pointers.has(e.pointerId)) {
+    const w = s2w(p.sx, p.sy);
+    if (draft.kind === "free") {
+      const l = draft.pts[draft.pts.length - 1];
+      if (Math.hypot(w[0] - l[0], w[1] - l[1]) >= Math.max(0.8, 2 / view.s)) draft.pts.push(w);
+    } else draft.b = snapP(w);
+  } else if (draft && draft.kind === "poly") draft.b = snapP(s2w(p.sx, p.sy));
+  draw();
+});
+function endPointer(e) {
+  pointers.delete(e.pointerId);
+  if (pinch) { if (pointers.size < 2) { pinch = null; if (!pointers.size) wsCache = null; } draw(); return; }
+  if (panning) { panning = null; return; }
+  if (draft && draft.kind !== "poly") finishDraft();
+}
+cv.addEventListener("pointerup", endPointer);
+cv.addEventListener("pointercancel", endPointer);
+cv.addEventListener("pointerleave", () => { if (!pointers.size) { hover = null; $("readout").textContent = ""; draw(); } });
+cv.addEventListener("wheel", e => { e.preventDefault(); const p = evW(e); zoomAt(Math.exp(-e.deltaY * 0.0015), p.sx, p.sy); }, { passive: false });
+cv.addEventListener("dblclick", e => { if (draft && draft.kind === "poly") finishDraft(); });
+
+function nearestStroke(sx, sy) {
+  let best = 12, bi = -1;
+  strokes.forEach((s, i) => {
+    for (let j = 0; j < s.pts.length - 1; j++) {
+      const a = w2s(...s.pts[j]), b = w2s(...s.pts[j + 1]);
+      const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy || 1;
+      const t = Math.max(0, Math.min(1, ((sx - a[0]) * dx + (sy - a[1]) * dy) / L2));
+      const d = Math.hypot(a[0] + t * dx - sx, a[1] + t * dy - sy);
+      if (d < best) { best = d; bi = i; }
+    }
+  });
+  return bi;
+}
+function eraseAt(sx, sy) {
+  const bi = nearestStroke(sx, sy);
+  if (bi >= 0) commit(strokes.filter((_, i) => i !== bi));
+}
+function paintAt(sx, sy) {
+  const bi = nearestStroke(sx, sy);
+  if (bi >= 0 && strokes[bi].color !== color)
+    commit(strokes.map((s, i) => i === bi ? Object.assign({}, s, { color }) : s));
+}
+
+/* ---------- keyboard ---------- */
+let spaceDown = false;
+const KEYS = { f: "free", l: "line", p: "poly", r: "rect", c: "circle", t: "paint", e: "erase" };
+document.addEventListener("keydown", e => {
+  if (e.target.closest("input, textarea, select")) return;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
+  if (e.key === "Enter" && draft && draft.kind === "poly") finishDraft();
+  else if (e.key === "Escape") { draft = null; stopAnim(); draw(); }
+  else if (e.key === " ") { spaceDown = true; e.preventDefault(); }
+  else if (!e.ctrlKey && !e.metaKey && KEYS[e.key.toLowerCase()]) setTool(KEYS[e.key.toLowerCase()]);
+});
+document.addEventListener("keyup", e => { if (e.key === " ") spaceDown = false; });
+
+/* ---------- toolbar ---------- */
+const HINTS = {
+  free: "Trascina per disegnare a mano libera.",
+  line: "Trascina da un punto all'altro.",
+  poly: "Tocca i vertici. Doppio tocco, Invio o tocco sul primo punto per finire.",
+  rect: "Trascina da un angolo all'angolo opposto.",
+  circle: "Trascina dal centro verso il bordo.",
+  paint: "Tocca un tratto per dargli il colore scelto.",
+  erase: "Tocca un tratto per cancellarlo.",
+  pan: "Trascina per spostare la vista. Due dita o rotellina per lo zoom.",
+};
+function setTool(t) {
+  if (draft && draft.kind === "poly" && t !== "poly") finishDraft();
+  tool = t;
+  document.querySelectorAll("[data-tool]").forEach(b => b.setAttribute("aria-pressed", b.dataset.tool === t));
+  cv.style.cursor = t === "pan" ? "grab" : t === "erase" || t === "paint" ? "pointer" : "crosshair";
+  updateHint();
+}
+function updateHint() {
+  $("hint").textContent = isSample ? "Disegno di esempio: premi Svuota per iniziare il tuo." : HINTS[tool];
+}
+document.querySelectorAll("[data-tool]").forEach(b => b.addEventListener("click", () => setTool(b.dataset.tool)));
+function undo() { if (!undoStack.length) return; redoStack.push(JSON.stringify(strokes)); strokes = JSON.parse(undoStack.pop()); changed(); }
+function redo() { if (!redoStack.length) return; undoStack.push(JSON.stringify(strokes)); strokes = JSON.parse(redoStack.pop()); changed(); }
+$("undo").onclick = undo; $("redo").onclick = redo;
+let clearTimer = null;
+$("clear").onclick = () => {
+  const b = $("clear");
+  if (b.dataset.armed === "true") { clearTimeout(clearTimer); b.dataset.armed = "false"; b.textContent = "Svuota"; commit([]); return; }
+  b.dataset.armed = "true"; b.textContent = "Sicuro?";
+  clearTimer = setTimeout(() => { b.dataset.armed = "false"; b.textContent = "Svuota"; }, 3000);
+};
+$("zin").onclick = () => zoomAt(1.3, W / 2, H / 2);
+$("zout").onclick = () => zoomAt(1 / 1.3, W / 2, H / 2);
+$("fit").onclick = () => { fitView(); draw(); };
+$("rot").onclick = () => { rot = rot ? 0 : 1; $("rot").setAttribute("aria-pressed", !!rot); fitView(); store(); draw(); };
+$("snap").onclick = () => { snap = !snap; $("snap").setAttribute("aria-pressed", snap); store(); };
+$("showtravel").onchange = draw;
+["feed", "m3", "fname"].forEach(id => $(id).addEventListener("input", () => { sim = simulate(); updatePanel(); store(); }));
+
+/* ---------- LED colour ---------- */
+const swatches = PALETTE.map(([hex, name]) => {
+  const b = document.createElement("button");
+  b.className = "swatch"; b.style.setProperty("--c", hex); b.title = name; b.setAttribute("aria-label", name);
+  b.setAttribute("role", "radio"); b.dataset.color = hex;
+  b.onclick = () => setColor(hex);
+  $("palette").insertBefore(b, $("customwrap"));
+  return b;
+});
+function setColor(hex) {
+  color = hex.toLowerCase();
+  let inPalette = false;
+  for (const b of swatches) { const on = b.dataset.color === color; inPalette = inPalette || on; b.setAttribute("aria-pressed", on); b.setAttribute("aria-checked", on); }
+  $("customwrap").setAttribute("aria-pressed", !inPalette);
+  if (!inPalette) { $("custom").value = color; $("customwrap").style.background = color; }
+  store(); draw();
+}
+$("custom").addEventListener("input", e => setColor(e.target.value));
+
+/* ---------- arm parameters ---------- */
+const PF = { l1: ["l1"], l2: ["l2"], min1: ["min", 0], max1: ["max", 0], min2: ["min", 1], max2: ["max", 1], h1: ["home", 0], h2: ["home", 1], maxy: ["maxY"] };
+function showParams() { for (const [id, [k, i]] of Object.entries(PF)) $(id).value = i === undefined ? P[k] : P[k][i]; }
+for (const [id, [k, i]] of Object.entries(PF)) $(id).addEventListener("change", () => {
+  const v = parseFloat($(id).value); if (!isFinite(v)) return;
+  if (i === undefined) P[k] = v; else P[k][i] = v;
+  wsCache = null; changed();
+});
+$("resetp").onclick = () => { P = JSON.parse(JSON.stringify(DEFAULTS)); showParams(); wsCache = null; changed(); };
+
+/* ---------- panel ---------- */
+function fmtTime(s) { const m = Math.floor(s / 60); return m ? `${m} min ${Math.round(s % 60)} s` : `${s.toFixed(1)} s`; }
+function updatePanel() {
+  const n = strokes.length, bad = sim.errors.length;
+  $("status").innerHTML = !n ? `<span class="chip" style="background:var(--muted)">VUOTO</span> Niente da disegnare`
+    : bad ? `<span class="chip bad">${bad} ${bad === 1 ? "ERRORE" : "ERRORI"}</span> Correggi i tratti in rosso`
+      : `<span class="chip">OK</span> Il braccio può disegnarlo`;
+  $("stats").innerHTML = [
+    ["Tratti", n], ["Righe G1", sim.g1],
+    ["Disegno", `${(sim.drawLen / 10).toFixed(1)} cm`], ["Tempo stimato", fmtTime(sim.time)],
+  ].map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
+  const ul = $("errors"); ul.innerHTML = "";
+  for (const e of sim.errors.slice(0, 8)) {
+    const li = document.createElement("li");
+    li.textContent = `Tratto ${e.i + 1}: ${e.msg} (X ${e.at[0].toFixed(1)}, Y ${e.at[1].toFixed(1)})`;
+    ul.appendChild(li);
+  }
+  if (sim.errors.length > 8) { const li = document.createElement("li"); li.className = "warn"; li.textContent = `e altri ${sim.errors.length - 8}`; ul.appendChild(li); }
+  $("out").value = gcode();
+  $("undo").disabled = !undoStack.length; $("redo").disabled = !redoStack.length;
+  $("play").disabled = !n;
+  robotButtons();
+  updateHint();
+}
+
+/* ---------- animation ---------- */
+function stopAnim() { if (anim) { cancelAnimationFrame(anim.raf); anim = null; $("play").textContent = "▶ Simula"; } }
+$("play").onclick = () => {
+  if (anim) { stopAnim(); draw(); return; }
+  if (!sim || sim.frames.length < 2) return;
+  const speed = +$("speed").value;
+  anim = { k: 0, th: sim.frames[0].th, on: false, t0: performance.now() };
+  $("play").textContent = "■ Ferma";
+  const step = now => {
+    const t = (now - anim.t0) / 1000 * speed, fr = sim.frames;
+    while (anim.k < fr.length - 1 && fr[anim.k + 1].t <= t) anim.k++;
+    if (anim.k >= fr.length - 1) { anim.th = fr[fr.length - 1].th; draw(); stopAnim(); setTimeout(draw, 1200); return; }
+    const a = fr[anim.k], b = fr[anim.k + 1], u = (t - a.t) / Math.max(1e-9, b.t - a.t);
+    anim.th = [a.th[0] + (b.th[0] - a.th[0]) * u, a.th[1] + (b.th[1] - a.th[1]) * u]; anim.on = b.on; anim.col = b.col;
+    draw(); anim.raf = requestAnimationFrame(step);
+  };
+  anim.raf = requestAnimationFrame(step);
+};
+
+/* ---------- save, copy, open ---------- */
+function toast(msg, bad) { const t = $("toast"); t.style.color = bad ? "var(--bad)" : "var(--ok)"; t.textContent = msg; }
+function baseName() { return ($("fname").value.trim() || "disegno").replace(/[^\w\-]+/g, "_").replace(/\.gcode$/i, ""); }
+let downloads = null;
+if (window.claude && window.claude.use) window.claude.use("downloads").then(d => { downloads = d; }).catch(() => {});
+$("save").onclick = async () => {
+  const text = gcode();
+  if (sim.errors.length) toast("Attenzione: il file contiene tratti che scara rifiuterà.", true);
+  if (downloads) {
+    /* the Claude viewer only saves known extensions; scara gcode doesn't care about the name */
+    try { await downloads.save({ filename: baseName() + ".gcode.txt", data: text }); toast("Salvato " + baseName() + ".gcode.txt"); }
+    catch (e) { if (e && e.code !== "declined") toast("Salvataggio non disponibile qui: usa Copia.", true); }
+    return;
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+  a.download = baseName() + ".gcode";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  if (!sim.errors.length) toast("Salvato " + baseName() + ".gcode");
+};
+$("copy").onclick = () => {
+  const text = gcode();
+  const fallback = () => { const d = document.querySelector("details"); d.open = true; $("out").focus(); $("out").select(); toast("Testo selezionato: copialo con Ctrl+C."); };
+  if (navigator.clipboard && navigator.clipboard.writeText)
+    navigator.clipboard.writeText(text).then(() => toast("G-code copiato.")).catch(fallback);
+  else fallback();
+};
+$("load").onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    const r = parseGcode(String(rd.result));
+    if (!r.strokes.length) { toast("Nessun tratto G1 trovato nel file.", true); return; }
+    if (r.feed) $("feed").value = Math.round(r.feed);
+    $("fname").value = f.name.replace(/\.(gcode|nc|txt)$/gi, "");
+    commit(r.strokes); toast(`Aperti ${r.strokes.length} tratti da ${f.name}.`);
+  };
+  rd.readAsText(f); e.target.value = "";
+};
+
+/* ---------- robot over the USB cable (Web Serial, Chrome / Edge) ----------
+ * Like tools/bbb_send.py: get a shell prompt on the board's console (logging
+ * in as root if asked), type the file in as a here-document one line per
+ * "> " prompt, check its line count, then run scara gcode on it and follow
+ * the "N: line" it prints. Ferma sends Ctrl-C, which stops scara like on
+ * the keyboard (it decelerates and switches the LED off). */
+const EOF_MARK = "SCARA_EOF_7f3a", BOARD_FILE = "/tmp/disegno.gcode";
+const enc = new TextEncoder();
+let port = null, writer = null, reader = null, rx = "", partial = "", logLines = [], job = null;
+function rstatus(html) { $("rstatus").innerHTML = html; }
+function robotButtons() {
+  $("connect").textContent = port ? "Scollega" : "Collega";
+  $("run").disabled = !port || !!job || !strokes.length;
+  $("stop").disabled = !port;
+}
+function onBoardText(t) {
+  rx += t;
+  const parts = (partial + t).split("\n");
+  partial = parts.pop();
+  for (let l of parts) {
+    l = l.replace(/\r/g, "");
+    logLines.push(l); if (logLines.length > 300) logLines.shift();
+    if (job && job.running) {
+      const m = l.match(/^(\d+): /);
+      if (m) job.line = Math.max(job.line, +m[1]);
+      if (/^error:|^stopped|^interrupted/.test(l)) job.err = l.replace(/^error: /, "");
+    }
+  }
+  const lg = $("rlog"); lg.textContent = logLines.slice(-60).join("\n"); lg.scrollTop = lg.scrollHeight;
+  if (job && job.running) showProgress();
+}
+async function readLoop(p) {
+  const dec = new TextDecoder();
+  while (p === port && p.readable) {
+    const r = reader = p.readable.getReader();
+    try {
+      for (;;) { const { value, done } = await r.read(); if (done) break; onBoardText(dec.decode(value, { stream: true })); }
+    } catch (e) { /* cable pulled or port closed */ } finally { r.releaseLock(); reader = null; }
+    if (p === port) { port = null; writer = null; rstatus("Scheda scollegata."); if (job) job.abort = true; robotButtons(); }
+  }
+}
+function send(t) { return writer.write(enc.encode(t)); }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+/* Wait until rx matches re; drop rx up to the end of the match */
+async function waitFor(re, ms) {
+  const t0 = performance.now();
+  for (;;) {
+    const m = rx.match(re);
+    if (m) { rx = rx.slice(m.index + m[0].length); return m; }
+    if (job && job.abort) throw new Error("Fermato.");
+    if (!port) throw new Error("La scheda si è scollegata.");
+    if (performance.now() - t0 > ms) throw new Error("La scheda non risponde.");
+    await sleep(15);
+  }
+}
+function showProgress() {
+  const j = job, n = j.total || 1;
+  const frac = j.running ? j.line / n : j.sent / n;
+  $("bar").style.width = `${Math.min(100, frac * 100).toFixed(1)}%`;
+  if (j.running) {
+    const st = j.lineStroke[j.line] || 0;
+    rstatus(`Disegno in corso: <b>tratto ${st} di ${j.strokes}</b>, riga ${j.line} di ${n}.`);
+  } else rstatus(`Copio il disegno sulla scheda: <b>${j.sent} di ${n}</b> righe.`);
+}
+async function connectRobot() {
+  if (port) {
+    const p = port, w = writer, r = reader; port = null; writer = null;
+    if (job) job.abort = true;
+    try { if (r) await r.cancel(); w.releaseLock(); await p.close(); } catch (e) { /* already gone */ }
+    rstatus("Scollegato."); robotButtons(); return;
+  }
+  if (!("serial" in navigator)) {
+    rstatus("Questo browser non può usare il cavo USB: apri <code>tools/disegna.html</code> dal PC con Chrome o Edge.");
+    return;
+  }
+  try {
+    const p = await navigator.serial.requestPort();
+    await p.open({ baudRate: 115200 });
+    port = p; writer = p.writable.getWriter(); rx = ""; partial = "";
+    readLoop(p);
+    rstatus("Collegato. Premi <b>Disegna sul robot</b> (chiudi picocom se è aperto).");
+  } catch (e) {
+    if (e && e.name === "NotFoundError") rstatus("Nessuna porta scelta.");
+    else if (e && e.name === "SecurityError") rstatus("Qui il cavo USB non è permesso: apri <code>tools/disegna.html</code> dal PC con Chrome o Edge.");
+    else rstatus(`Non riesco ad aprire la porta: ${e && e.message ? e.message : e}. È aperta in picocom? Su Linux serve il gruppo <code>dialout</code>.`);
+  }
+  robotButtons();
+}
+/*
+ * Get to a "# " prompt from wherever the console is: the login prompt after
+ * a boot (log in as root), a password prompt, a here-document left open
+ * (Ctrl-C) or a shell. A wrong login takes the board a few seconds.
+ */
+async function shellPrompt() {
+  rx = ""; await send("\n");
+  const t0 = performance.now();
+  while (performance.now() - t0 < 20000) {
+    await sleep(700);
+    if (!port) throw new Error("La scheda si è scollegata.");
+    const tail = rx.slice(-80);
+    if (/login:\s*$/.test(tail)) { rx = ""; rstatus("Entro come root…"); await send("root\n"); }
+    else if (/Password:\s*$/.test(tail)) { rx = ""; await send("\n"); }
+    else if (/\n> $/.test(tail)) { rx = ""; await send("\x03\n"); }
+    else if (/[#$] $/.test(tail)) return;
+    else if (!rx) await send("\n");
+  }
+  throw new Error("La scheda non risponde: è accesa e collegata col cavo mini-USB? Chiudi picocom se è aperto.");
+}
+async function runRobot() {
+  if (!port || job) return;
+  if (sim.errors.length) { rstatus("Il disegno ha tratti in rosso: scara li rifiuterebbe. Correggili prima."); return; }
+  const text = gcode(), lines = text.replace(/\n$/, "").split("\n");
+  /* which stroke each file line belongs to, for the progress line */
+  const lineStroke = []; let st = 0;
+  lines.forEach((l, i) => { const m = l.match(/^; tratto (\d+)/); if (m) st = +m[1]; lineStroke[i + 1] = st; });
+  job = { total: lines.length, sent: 0, line: 0, running: false, abort: false, err: "", lineStroke, strokes: strokes.length };
+  robotButtons(); stopAnim();
+  try {
+    await shellPrompt();
+    rx = ""; await send("echo READY_$((40+2))\n");
+    await waitFor(/READY_42/, 5000);
+    await sleep(200); rx = "";
+    await send(`cat > ${BOARD_FILE} <<'${EOF_MARK}'\n`);
+    for (const l of lines) {
+      await waitFor(/\n> /, 5000);
+      await send(l + "\n");
+      job.sent++; if (job.sent % 20 === 0 || job.sent === lines.length) showProgress();
+    }
+    await waitFor(/\n> /, 5000);
+    await send(EOF_MARK + "\n"); await sleep(300); rx = "";
+    await send(`echo LINES_$(wc -l < ${BOARD_FILE})\n`);
+    const m = await waitFor(/LINES_(\d+)/, 5000);
+    if (+m[1] !== lines.length) throw new Error(`Copia incompleta: ${m[1]} righe su ${lines.length}. Riprova.`);
+    job.running = true; showProgress();
+    await send(`scara gcode ${BOARD_FILE}; echo SCARA_EXIT_$?\n`);
+    const e = await waitFor(/SCARA_EXIT_(\d+)/, 6 * 3600 * 1000);
+    job.running = false;
+    if (+e[1] === 0) { $("bar").style.width = "100%"; rstatus(`<b>Disegno finito.</b> ${job.strokes} tratti.`); }
+    else rstatus(`<span style="color:var(--bad)">scara si è fermato: ${job.err || "vedi l'uscita della scheda"}</span>`);
+  } catch (err) {
+    rstatus(`<span style="color:var(--bad)">${err.message}</span>`);
+  } finally {
+    job = null; robotButtons();
+  }
+}
+$("connect").onclick = connectRobot;
+$("run").onclick = runRobot;
+$("stop").onclick = async () => {
+  if (!port) return;
+  if (job) job.abort = !job.running;   /* while copying: give up; while drawing: scara stops itself */
+  try { await send("\x03"); } catch (e) { /* port gone */ }
+  rstatus("Ferma inviato (Ctrl-C).");
+};
+if (navigator.serial) navigator.serial.addEventListener("disconnect", e => { if (e.target === port) { port = null; writer = null; rstatus("Scheda scollegata."); robotButtons(); } });
+
+/* ---------- theme changes ---------- */
+const mq = window.matchMedia("(prefers-color-scheme: dark)");
+const retheme = () => { readColors(); draw(); };
+mq.addEventListener ? mq.addEventListener("change", retheme) : mq.addListener(retheme);
+new MutationObserver(retheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+/* ---------- start ---------- */
+if (!restore()) { strokes = JSON.parse(JSON.stringify(SAMPLE)); isSample = true; }
+showParams();
+$("rot").setAttribute("aria-pressed", !!rot); $("snap").setAttribute("aria-pressed", snap);
+readColors();
+setColor(color);
+sim = simulate(); updatePanel();
+rstatus("serial" in navigator ? "Collega la BeagleBone con il cavo mini-USB e premi <b>Collega</b>."
+  : "Per disegnare dal cavo USB apri <code>tools/disegna.html</code> dal PC con Chrome o Edge.");
+new ResizeObserver(resize).observe($("board"));
+if (document.fonts) document.fonts.ready.then(draw);
+window.__scara = { ik, linePlan, simulate, gcode, parseGcode, fk, setStrokes: s => { strokes = s; changed(); } };
+})();
+</script>
+</body>
+</html>

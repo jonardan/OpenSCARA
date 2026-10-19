@@ -88,6 +88,15 @@ flowchart LR
 | P9_43..P9_46 | GND | endstop common | any BBB GND works |
 | P9_28 | (HDMI audio) | **nothing** | stuck at ~3.3 V on this board, never use |
 
+### BeagleBone Black P8 header
+
+| BBB pin | Signal | Goes to | Notes |
+|---|---|---|---|
+| P8_12 | GPIO1_12 | tip LED red, through 330 Ω | kernel LED `tip-red`, on/off only, pulled down (off at boot) |
+| P8_13 | EHRPWM2B | tip LED green, through 150 Ω | kernel LED `tip-green`, PWM 0-255 |
+| P8_19 | EHRPWM2A | tip LED blue, through 150 Ω | kernel LED `tip-blue`, PWM 0-255 |
+| P8_2 | GND | tip LED common cathode | P8_1 works too; a common anode LED goes to P9_3 (3.3 V) instead |
+
 ### TMC2209 drivers
 
 | Driver pin | Driver 1 (motor 1) | Driver 2 (motor 2) |
@@ -266,16 +275,53 @@ accelerates only at the ends of the line.
 
 ## 🧾 G-code
 
-`gcode.c` parses one G-code line (G0, G1, G28, G90/G91, G21, M3/M5, comments)
+`gcode.c` parses one G-code line (G0, G1, G28, G90/G91, G21, M3/M5, M150, comments)
 with no hardware code, tested on the PC with `make test` like the math.
 `scara gcode FILE` checks every line and every move of the file, then runs
 G0 as `goto`, G1 as `line` and G28 as `home`. `scara gcode -` streams stdin
 instead: each line is checked from where the arm is, run, and answered `ok`
 (or `error`), so a PC-side sender can feed a drawing over the console.
+The arm stands in a vertical plane with the table on the +Y side
+(`scara goto 250 -60` moves the tip up). The tip never goes past
+`max_y_mm` (0: the X axis). `ik` refuses such points, `line` and G1 check
+every 1 mm point, and a `goto` or G0 checks the curve its joint move
+swings the tip along. Out of the folded home pose a single joint move
+swings the tip 100-350 mm towards the table, which is what hit it before;
+`plan_g0` then turns the shoulder first, with the tip folded close to the
+shoulder, and the elbow after, or the other way round, or goes straight
+(`kin_joint_move` in `kinematics.c`, `plan_g0` in `scara.c`). Within 60
+mm of the shoulder axis the folded tip may cross the X axis (home itself
+is 16 mm past it). Homing can't be checked (the pose before it may be
+unknown): `scara home` folds the elbow, then turns the shoulder to its
+switch.
+
 In a file, consecutive G1 lines that bend by at most `corner_deg` run as one
 `move_path`, so curves made of short segments don't stop at every join. A
-sample square and a spiral of G1 segments are installed in
-`/usr/share/scara/`.
+sample square, a spiral of G1 segments and an RGB square (`rgb.gcode`)
+are installed in `/usr/share/scara/`.
+
+## 💡 Tip LED (RGB)
+
+The tip carries an RGB LED: red on P8_12 through 330 Ω, green on P8_13
+and blue on P8_19 through 150 Ω each, common leg to GND. A pin gives ~4 mA
+at most, so use transistors for anything brighter. P8_12 has no PWM, so
+red is on or off; P8_13 and P8_19 are the two outputs of EHRPWM2 (10 kHz),
+so green and blue have 256 levels. The device tree makes them the kernel
+LEDs `tip-red`, `tip-green` and `tip-blue` (gpio-leds and pwm-leds), so
+the kernel holds the pins after the command exits; `led_red`,
+`led_green` and `led_blue` in `tmc2209.conf` name them. A common anode LED
+(long leg to 3.3 V) works with `led_common = anode`, which inverts the
+pins; the boot script then switches it off, since the pins sit low (on)
+until it runs.
+
+In G-code, M3 (M106) turns the tool on and M5 (M107) off, but the LED only
+lights while a G1 line is being drawn with the tool on: it is off during
+G0 travel and G28 homing, and `scara gcode` switches it off when the file
+ends, fails or is stopped with Ctrl-C. `M150 R U B` (Marlin style, 0-255,
+U is green) sets the colour, which stays until the next M150; it is white
+before the first. `scara led red`, `scara led 0 255 128` or
+`scara led off` set it by hand. Wiring and test:
+`board/beaglebone/readme.txt`, "Tip LED: scara led".
 
 ## ⚠️ Why STEP 2 is on P9_12 and not P9_28
 

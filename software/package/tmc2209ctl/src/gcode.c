@@ -50,8 +50,8 @@ int gc_parse(struct gc_state *st, const char *line, struct gc_line *out,
 {
 	struct gc_line l;
 	const char *p = line, *end;
-	int motion = -1, seen_s = 0;
-	double v;
+	int motion = -1, seen_s = 0, has_rgbp[4] = { 0 }, k;
+	double v, rgbp[4] = { 0, 0, 0, 255 };
 
 	memset(&l, 0, sizeof(l));
 	while (*p) {
@@ -115,6 +115,8 @@ int gc_parse(struct gc_state *st, const char *line, struct gc_line *out,
 					return fail(err, errlen, "tool on and "
 						    "off on one line");
 				l.tool = t;
+			} else if (v == 150) {
+				l.color = 1;
 			} else if (v == 2 || v == 30) {
 				l.end = 1;
 			} else {
@@ -136,6 +138,18 @@ int gc_parse(struct gc_state *st, const char *line, struct gc_line *out,
 			*val = v;
 			break;
 		}
+		case 'R':		/* M150 red, green (U), blue, brightness */
+		case 'U':
+		case 'B':
+		case 'P': {
+			k = c == 'R' ? 0 : c == 'U' ? 1 : c == 'B' ? 2 : 3;
+			if (has_rgbp[k]++)
+				return fail(err, errlen, "%c twice", c);
+			if (v < 0 || v > 255)
+				return fail(err, errlen, "%c must be 0-255", c);
+			rgbp[k] = v;
+			break;
+		}
 		case 'S':		/* tool power: not used yet */
 			if (seen_s++)
 				return fail(err, errlen, "S twice");
@@ -145,6 +159,11 @@ int gc_parse(struct gc_state *st, const char *line, struct gc_line *out,
 		}
 	}
 
+	if (!l.color && (has_rgbp[0] || has_rgbp[1] || has_rgbp[2] ||
+			 has_rgbp[3]))
+		return fail(err, errlen, "R, U, B and P only go with M150");
+	for (k = 0; l.color && k < 3; k++)
+		l.rgb[k] = (int)(rgbp[k] * rgbp[3] / 255 + 0.5);
 	if (l.has_f && l.f <= 0)
 		return fail(err, errlen, "F must be > 0");
 	/* G28 X0 Y0 means "home X and Y": both are always homed */

@@ -61,10 +61,16 @@ static void usage(void)
 "                        and the elbow stays on the side it is on\n"
 "  gcode [-n] FILE       run a G-code file: G0 X Y (goto), G1 X Y F\n"
 "                        (line, F in mm/min), G28 (home), G90 / G91, G21;\n"
-"                        M3/M5 and Z are ignored for now.  Every line is\n"
-"                        checked before anything moves; -n only checks.\n"
+"                        M3/M5 (tool on/off: the tip LED lights only\n"
+"                        while G1 draws with the tool on), M150 R U B\n"
+"                        (its color, 0-255, white by default); Z ignored.\n"
+"                        Every line is checked before anything moves;\n"
+"                        -n only checks.\n"
 "                        FILE - streams stdin: each line is checked, run\n"
 "                        and answered ok (or error, and it stops)\n"
+"  led [COLOR]           set the tip RGB LED, or print its color: off,\n"
+"                        on (white), red, green, blue, yellow, cyan,\n"
+"                        magenta, orange, purple, #rrggbb or R G B (0-255)\n"
 "\n"
 "  Angles: shoulder from the +X axis, elbow from the line of link 1\n"
 "  (0 = straight), counter-clockwise positive seen from above.  X/Y in\n"
@@ -109,6 +115,8 @@ static int get_arm(struct arm *a)
 		a->min[j] = motors[j].min_angle;
 		a->max[j] = motors[j].max_angle;
 	}
+	a->table_on = !motors[0].max_y_off;
+	a->table_y = motors[0].max_y_mm;
 	return 0;
 }
 
@@ -285,23 +293,139 @@ static int cmd_joint(int argc, char **argv)
 	return move_to_angles(target, rpm);
 }
 
-/* The tip to x, y: IK, then the same joint move as 'joint' */
+static int line_to(const struct arm *a, double x, double y, double speed);
+
+/*
+ * A straight line from the joint angles th[] to x, y, on paper (line.c):
+ * KIN_OK with th[] set to where it ends, or the first bad point in *bx, *by.
+ */
+static enum kin_result plan_line(const struct arm *a, double x, double y,
+				 double th[NJOINTS], double *bx, double *by)
+{
+	double x0, y0, (*pts)[NJOINTS];
+	enum kin_result r;
+	int npts;
+
+	*bx = x;
+	*by = y;
+	kin_forward(a, th, &x0, &y0);
+	npts = line_npts(hypot(x - x0, y - y0), LINE_SEG_MM);
+	pts = malloc(npts * sizeof(*pts));
+	if (!pts) {
+		err("out of memory");
+		exit(1);
+	}
+	r = line_plan(a, th, x, y, npts, pts, bx, by);
+	if (r == KIN_OK)
+		memcpy(th, pts[npts - 1], sizeof(pts[0]));
+	free(pts);
+	return r;
+}
+
+/* How a goto (G0) gets there, from plan_g0() */
+struct g0_plan {
+	int straight;		/* a straight line (line_to) */
+	int via;		/* two joint moves: to via_th[], then to[] */
+	double via_th[NJOINTS], to[NJOINTS];
+};
+
+/*
+ * How a goto (G0) gets the tip from the joint angles from[] to x, y.  A
+ * joint move turns both joints together, so the tip swings along a curve
+ * that can swing past max_y_mm (into the table) even when both ends are
+ * clear of it: out of the folded home pose it swings 100-350 mm towards
+ * the table.  In order, to the IK solution nearest from[] and then (with
+ * ELBOW_ANY) to the other elbow side: one joint move; the shoulder first,
+ * then the elbow (out of home the folded tip then circles close to the
+ * shoulder); the elbow first, then the shoulder.  Last, a straight line,
+ * which can't cross the table since its edge is straight.  KIN_OK with *p
+ * filled; else the first bad point of the direct move in *bx, *by.
+ */
+static enum kin_result plan_g0(const struct arm *a, double x, double y,
+			       enum elbow side, const double from[NJOINTS],
+			       struct g0_plan *p, double *bx, double *by)
+{
+	double sol[2][NJOINTS], v[NJOINTS], end[NJOINTS], tx, ty;
+	enum kin_result r;
+	int n = 1, i, k;
+
+	memset(p, 0, sizeof(*p));
+	*bx = x;
+	*by = y;
+	r = kin_inverse(a, x, y, side, from, sol[0]);
+	if (r != KIN_OK)
+		return r;
+	if (side == ELBOW_ANY &&
+	    kin_inverse(a, x, y, sol[0][1] < 0 ? ELBOW_POS : ELBOW_NEG, NULL,
+			sol[1]) == KIN_OK)
+		n = 2;
+	for (i = 0; i < n; i++)
+		if (kin_joint_move(a, from, sol[i], &tx, &ty) == KIN_OK) {
+			memcpy(p->to, sol[i], sizeof(p->to));
+			return KIN_OK;
+		}
+	for (k = 0; k < 2; k++) {
+		for (i = 0; i < n; i++) {
+			/*
+			 * k = 0: shoulder first; k = 1: elbow first.  The
+			 * joint that waits is brought inside its limits: home
+			 * (elbow 171) is past max_angle (166).
+			 */
+			v[0] = k ? fmax(a->min[0], fmin(a->max[0], from[0])) :
+				   sol[i][0];
+			v[1] = k ? sol[i][1] :
+				   fmax(a->min[1], fmin(a->max[1], from[1]));
+			if (kin_joint_move(a, from, v, &tx, &ty) == KIN_OK &&
+			    kin_joint_move(a, v, sol[i], &tx, &ty) == KIN_OK) {
+				p->via = 1;
+				memcpy(p->via_th, v, sizeof(v));
+				memcpy(p->to, sol[i], sizeof(p->to));
+				return KIN_OK;
+			}
+		}
+	}
+	memcpy(end, from, sizeof(end));
+	if (plan_line(a, x, y, end, &tx, &ty) == KIN_OK) {
+		p->straight = 1;
+		memcpy(p->to, end, sizeof(p->to));
+		return KIN_OK;
+	}
+	kin_joint_move(a, from, sol[0], bx, by);
+	return KIN_TABLE;
+}
+
+/* G0 / goto as a straight line: as fast as the motors' rpm allows */
+#define G0_LINE_SPEED	1000	/* mm/s, lowered by move_path */
+
+/*
+ * The tip to x, y: IK, then the same joint move as 'joint', or the safer
+ * moves plan_g0 picks when that one would swing the tip into the table
+ */
 static int goto_xy(const struct arm *a, double x, double y, enum elbow side,
 		   double rpm)
 {
-	double th[NJOINTS], now[NJOINTS];
+	double now[NJOINTS], bx, by;
+	struct g0_plan p;
 	enum kin_result r;
 
 	if (get_angles(now)) {
 		err("the arm is not homed; run 'scara home'");
 		return -1;
 	}
-	r = kin_inverse(a, x, y, side, now, th);
+	r = plan_g0(a, x, y, side, now, &p, &bx, &by);
 	if (r != KIN_OK) {
-		err("%.2f, %.2f: %s", x, y, kin_strerror(r));
+		if (r == KIN_TABLE)
+			err("%.2f, %.2f: the move would take the tip to %.2f, "
+			    "%.2f: %s", x, y, bx, by, kin_strerror(r));
+		else
+			err("%.2f, %.2f: %s", x, y, kin_strerror(r));
 		return -1;
 	}
-	return move_to_angles(th, rpm);
+	if (p.straight)
+		return line_to(a, x, y, G0_LINE_SPEED);
+	if (p.via && move_to_angles(p.via_th, rpm))
+		return -1;
+	return move_to_angles(p.to, rpm);
 }
 
 /* goto X Y [+|-] [RPM] */
@@ -404,7 +528,7 @@ static int path_to(const struct arm *a, int n, const double (*xy)[2],
 	if (move_path(NJOINTS, both, npts, pts, dist, &speed,
 		      motors[0].line_accel, &interrupted))
 		goto out;
-	if (speed < asked)
+	if (speed < asked && asked < G0_LINE_SPEED)
 		printf("speed lowered to %.1f mm/s: a motor would go over its "
 		       "rpm\n", speed);
 	if (interrupted) {
@@ -488,6 +612,185 @@ static int cmd_home(int argc, char **argv)
 	return cmd_where();
 }
 
+/*
+ * The tip RGB LED is three kernel LEDs from the device tree (gpio-leds red,
+ * pwm-leds green and blue), not GPIO lines requested here: a requested
+ * line goes back to an input when the program exits, which would switch
+ * the LED off.  The kernel holds them instead.  Colors are 0-255 per
+ * channel; a channel with max_brightness 1 (red, plain GPIO) is on for
+ * anything above 0.  With led_common = anode the pins are inverted.
+ */
+static const char *const led_color_names[3] = { "red", "green", "blue" };
+
+static const char *led_name(int i)
+{
+	return i == 0 ? motors[0].led_red : i == 1 ? motors[0].led_green :
+	       motors[0].led_blue;
+}
+
+static const char *led_path(int i, const char *file)
+{
+	static char path[128];
+
+	snprintf(path, sizeof(path), "/sys/class/leds/%s/%s", led_name(i),
+		 file);
+	return path;
+}
+
+static void led_error(int i)
+{
+	err("%s: %s (is led_%s = %s right in %s?)", led_path(i, "brightness"),
+	    strerror(errno), led_color_names[i], led_name(i), CONF_PATH);
+}
+
+/* A number from a sysfs file, or -1 */
+static int led_read(int i, const char *file)
+{
+	char buf[16];
+	FILE *f = fopen(led_path(i, file), "r");
+	int ok = f && fgets(buf, sizeof(buf), f);
+
+	if (f)
+		fclose(f);
+	return ok ? atoi(buf) : -1;
+}
+
+/* max_brightness of channel i (1 for GPIO, 255 for PWM), or -1 */
+static int led_max(int i)
+{
+	static int max[3];
+
+	if (max[i] <= 0)
+		max[i] = led_read(i, "max_brightness");
+	return max[i];
+}
+
+static const int led_black[3];
+static const int led_white[3] = { 255, 255, 255 };
+
+/* Last color written: -1 not known yet; led_lit: it is not black */
+static int led_shown[3] = { -1, -1, -1 };
+static int led_lit;
+
+/* Show a color; a failure is reported once and doesn't stop a drawing */
+static int led_show(const int rgb[3])
+{
+	static int said;
+	int i, max, raw, ret = 0;
+	FILE *f;
+
+	for (i = 0; i < 3; i++) {
+		if (rgb[i] == led_shown[i])
+			continue;
+		max = led_max(i);
+		/* Rounded up, so a dim value still lights a GPIO channel */
+		raw = max > 0 ? (rgb[i] * max + 254) / 255 : 0;
+		if (motors[0].led_anode)
+			raw = max - raw;
+		f = max > 0 ? fopen(led_path(i, "brightness"), "w") : NULL;
+		if (!f || fprintf(f, "%d", raw) < 0 || fclose(f)) {
+			if (!said++)
+				led_error(i);
+			led_shown[i] = -1;
+			ret = -1;
+			continue;
+		}
+		led_shown[i] = rgb[i];
+	}
+	led_lit = rgb[0] || rgb[1] || rgb[2];
+	return ret;
+}
+
+static int led_off(void)
+{
+	return led_show(led_black);
+}
+
+/* Colors for "scara led NAME" */
+static const struct {
+	const char *name;
+	int rgb[3];
+} led_colors[] = {
+	{ "white", { 255, 255, 255 } }, { "red", { 255, 0, 0 } },
+	{ "green", { 0, 255, 0 } }, { "blue", { 0, 0, 255 } },
+	{ "yellow", { 255, 255, 0 } }, { "cyan", { 0, 255, 255 } },
+	{ "magenta", { 255, 0, 255 } }, { "orange", { 255, 64, 0 } },
+	{ "purple", { 255, 0, 160 } }, { "on", { 255, 255, 255 } },
+	{ "off", { 0, 0, 0 } },
+};
+
+/* "0".."255" into *v */
+static int led_byte(const char *s, int *v)
+{
+	char *end;
+	long n = strtol(s, &end, 10);
+
+	if (!*s || *end || n < 0 || n > 255)
+		return -1;
+	*v = n;
+	return 0;
+}
+
+/* A color: a name, #rrggbb, or R G B (argc 1 or 3) */
+static int led_parse(int argc, char **argv, int rgb[3])
+{
+	unsigned int hex;
+	char *end;
+	size_t i;
+
+	if (argc == 3)
+		return led_byte(argv[0], &rgb[0]) ||
+		       led_byte(argv[1], &rgb[1]) ||
+		       led_byte(argv[2], &rgb[2]) ? -1 : 0;
+	if (argc != 1)
+		return -1;
+	if (argv[0][0] == '#' && strlen(argv[0]) == 7) {
+		hex = strtoul(argv[0] + 1, &end, 16);
+		if (*end)
+			return -1;
+		rgb[0] = hex >> 16;
+		rgb[1] = hex >> 8 & 255;
+		rgb[2] = hex & 255;
+		return 0;
+	}
+	for (i = 0; i < sizeof(led_colors) / sizeof(led_colors[0]); i++)
+		if (!strcmp(argv[0], led_colors[i].name)) {
+			memcpy(rgb, led_colors[i].rgb, sizeof(led_colors[i].rgb));
+			return 0;
+		}
+	return -1;
+}
+
+static int cmd_led(int argc, char **argv)
+{
+	int rgb[3], raw, max, i;
+
+	if (argc > 1) {
+		if (led_parse(argc - 1, argv + 1, rgb)) {
+			err("usage: led [off|on|white|red|green|blue|yellow|"
+			    "cyan|magenta|orange|purple|#rrggbb|R G B]");
+			return -1;
+		}
+		return led_show(rgb);
+	}
+	for (i = 0; i < 3; i++) {
+		max = led_max(i);
+		raw = max > 0 ? led_read(i, "brightness") : -1;
+		if (raw < 0) {
+			led_error(i);
+			return -1;
+		}
+		if (motors[0].led_anode)
+			raw = max - raw;
+		rgb[i] = (raw * 255 + max / 2) / max;
+	}
+	if (rgb[0] || rgb[1] || rgb[2])
+		printf("led: %d %d %d\n", rgb[0], rgb[1], rgb[2]);
+	else
+		printf("led: off\n");
+	return 0;
+}
+
 /* A G-code program: the text of every line and what it parsed to */
 struct prog {
 	const char *name;
@@ -569,25 +872,14 @@ static enum kin_result plan_move(const struct arm *a, int motion, double x,
 				 double y, double th[NJOINTS], double *bx,
 				 double *by)
 {
-	double x0, y0, (*pts)[NJOINTS];
+	struct g0_plan p;
 	enum kin_result r;
-	int npts;
 
-	*bx = x;
-	*by = y;
-	if (!motion)
-		return kin_inverse(a, x, y, ELBOW_ANY, th, th);
-	kin_forward(a, th, &x0, &y0);
-	npts = line_npts(hypot(x - x0, y - y0), LINE_SEG_MM);
-	pts = malloc(npts * sizeof(*pts));
-	if (!pts) {
-		err("out of memory");
-		exit(1);
-	}
-	r = line_plan(a, th, x, y, npts, pts, bx, by);
+	if (motion)
+		return plan_line(a, x, y, th, bx, by);
+	r = plan_g0(a, x, y, ELBOW_ANY, th, &p, bx, by);
 	if (r == KIN_OK)
-		memcpy(th, pts[npts - 1], sizeof(pts[0]));
-	free(pts);
+		memcpy(th, p.to, sizeof(p.to));
 	return r;
 }
 
@@ -597,7 +889,9 @@ struct run {
 	const char *name;
 	int dry;
 	double th[NJOINTS], x, y, speed;
-	int rel, is_homed, said_z, said_tool;
+	int rel, is_homed, said_z;
+	int tool;		/* M3: G1 moves light the LED, until M5 */
+	int rgb[3];		/* M150: the color they light it with */
 };
 
 static void run_init(struct run *r, const struct arm *a, const char *name,
@@ -608,6 +902,7 @@ static void run_init(struct run *r, const struct arm *a, const char *name,
 	r->name = name;
 	r->dry = dry;
 	r->speed = motors[0].line_speed;
+	memcpy(r->rgb, led_white, sizeof(r->rgb));
 	r->is_homed = get_angles(r->th) == 0;
 	if (r->is_homed)
 		kin_forward(a, r->th, &r->x, &r->y);
@@ -617,7 +912,10 @@ static void run_init(struct run *r, const struct arm *a, const char *name,
  * Run line n, or with r->dry only follow it on paper: the move is planned
  * from where the previous one left the joints, so an unreachable point is
  * found before anything moves.  G0 is 'goto', G1 is 'line', G28 is 'home'.
- * M3/M5 and Z are reported once, on the dry run.  Returns 1 after M2/M30.
+ * The LED is on only during a G1 move after M3: off for G0, G28 and M5
+ * (M3 itself waits for the next G1), in the color of the last M150 (white
+ * before any); an M150 while it is lit recolors it at once.  Z is reported once, on the dry run.
+ * Returns 1 after M2/M30.
  */
 static int run_line(struct run *r, const struct gc_line *l, const char *text,
 		    int n)
@@ -632,16 +930,15 @@ static int run_line(struct run *r, const struct gc_line *l, const char *text,
 		return -1;
 	}
 	if (!r->dry && !stream && (l->dist || l->home || l->move ||
-				   l->has_f || l->end))
+				   l->has_f || l->color || l->end))
 		printf("%d: %s\n", n, text);
 	if (r->dry && l->has_z && !r->said_z++)
 		printf("%s:%d: Z ignored, the arm has no Z axis\n", r->name, n);
-	if (r->dry && l->tool && !r->said_tool++)
-		printf("%s:%d: M3/M5 ignored, the tip LED is not wired yet\n",
-		       r->name, n);
 	if (l->dist)
 		r->rel = l->dist == GC_REL;
 	if (l->home) {
+		if (!r->dry)
+			led_off();
 		if (r->dry) {
 			for (j = 0; j < NJOINTS; j++)
 				r->th[j] = motors[j].home_angle;
@@ -655,6 +952,11 @@ static int run_line(struct run *r, const struct gc_line *l, const char *text,
 	}
 	if (l->has_f)
 		r->speed = l->f / 60;	/* mm/min to mm/s */
+	if (l->color) {
+		memcpy(r->rgb, l->rgb, sizeof(r->rgb));
+		if (!r->dry && led_lit)
+			led_show(r->rgb);
+	}
 	if (l->move) {
 		tx = l->has_x ? l->x + (r->rel ? r->x : 0) : r->x;
 		ty = l->has_y ? l->y + (r->rel ? r->y : 0) : r->y;
@@ -672,16 +974,23 @@ static int run_line(struct run *r, const struct gc_line *l, const char *text,
 				    text, bx, by, kin_strerror(k));
 				return -1;
 			}
-		} else if (l->motion ? line_to(r->a, tx, ty, r->speed) :
-			   goto_xy(r->a, tx, ty, ELBOW_ANY, motors[0].rpm)) {
-			err("%s:%d: %s", r->name, n, text);
-			return -1;
-		} else if (get_angles(r->th)) {
-			return -1;
+		} else {
+			led_show(l->motion && r->tool ? r->rgb : led_black);
+			if (l->motion ? line_to(r->a, tx, ty, r->speed) :
+			    goto_xy(r->a, tx, ty, ELBOW_ANY, motors[0].rpm)) {
+				err("%s:%d: %s", r->name, n, text);
+				return -1;
+			}
+			if (get_angles(r->th))
+				return -1;
 		}
 		r->x = tx;
 		r->y = ty;
 	}
+	if (l->tool)
+		r->tool = l->tool == GC_TOOL_ON;
+	if (!r->dry && (!r->tool || l->end))
+		led_off();
 	return l->end ? 1 : 0;
 }
 
@@ -707,9 +1016,11 @@ static int chain(const struct prog *p, int i, struct run *r,
 		int rel = l->dist ? l->dist == GC_REL : c.rel;
 		double tx, ty, dx, dy, len;
 
-		if (k > i && (l->home || l->tool || l->end || sp != c.speed ||
-			      (l->move && !l->motion)))
+		if (k > i && (l->home || l->tool || l->color || l->end ||
+			      sp != c.speed || (l->move && !l->motion)))
 			break;
+		if (l->color)	/* only on line i: M150 on the G1 line */
+			memcpy(c.rgb, l->rgb, sizeof(c.rgb));
 		if (l->move) {
 			tx = l->has_x ? l->x + (rel ? c.x : 0) : c.x;
 			ty = l->has_y ? l->y + (rel ? c.y : 0) : c.y;
@@ -763,6 +1074,7 @@ static int prog_run(const struct prog *p, const struct arm *a, int dry)
 			if (n > 1) {
 				for (k = i; k <= last; k++)
 					printf("%d: %s\n", k + 1, p->text[k]);
+				led_show(c.tool ? c.rgb : led_black);
 				if (path_to(a, n, (const double (*)[2])xy,
 					    c.speed) || get_angles(c.th)) {
 					err("%s:%d-%d: G1 path failed", p->name,
@@ -817,7 +1129,6 @@ static int stream_run(const struct arm *a, int dry)
 		check.dry = 1;
 		ret = run_line(&check, &l, buf, n);
 		r.said_z = check.said_z;
-		r.said_tool = check.said_tool;
 		if (ret >= 0 && !dry)
 			ret = run_line(&r, &l, buf, n);
 		if (dry)
@@ -864,6 +1175,8 @@ static int cmd_gcode(int argc, char **argv)
 		stream = quiet = 1;
 		ret = stream_run(&a, dry);
 		stream = quiet = 0;
+		if (!dry)
+			led_off();
 		return ret ? ret : dry ? 0 : cmd_where();
 	}
 	if (prog_load(argv[1 + dry], &p))
@@ -876,10 +1189,11 @@ static int cmd_gcode(int argc, char **argv)
 		goto out;
 	}
 	quiet = 1;
-	if (prog_run(&p, &a, 0))
-		goto out;
+	ret = prog_run(&p, &a, 0);
+	led_off();	/* off however the file ended */
 	quiet = 0;
-	ret = cmd_where();
+	if (!ret)
+		ret = cmd_where();
 out:
 	prog_free(&p);
 	return ret;
@@ -903,6 +1217,9 @@ int main(int argc, char **argv)
 	}
 	/* No SA_RESTART, like tmc2209ctl: Ctrl-C decelerates the move */
 	sigaction(SIGINT, &sa, NULL);
+	/* kill or a closed console: stop the same way, so the LED goes off */
+	sigaction(SIGTERM, &sa, NULL);
+	sigaction(SIGHUP, &sa, NULL);
 
 	c = argv[i];
 	argc -= i;
@@ -911,6 +1228,8 @@ int main(int argc, char **argv)
 		usage();
 		return 0;
 	}
+	if (!strcmp(c, "led"))
+		return cmd_led(argc, argv) ? 1 : 0;
 	if (need_joints())
 		return 1;
 	if (!strcmp(c, "where"))

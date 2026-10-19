@@ -301,10 +301,10 @@ Moving to X/Y: scara goto
   pen (or the LED) on it, then
 
   scara home
-  scara goto 150 -50 +            # mark the dot, then the next corner
-  scara goto 250 -50 +
-  scara goto 250 50 +
-  scara goto 150 50 +
+  scara goto 150 20 +             # mark the dot, then the next corner
+  scara goto 250 20 +
+  scara goto 250 120 +
+  scara goto 150 120 +
 
   Measure the four sides (100 mm) and both diagonals (141.4 mm); this
   needs no origin on the paper. Sides too long or too short, more so on
@@ -328,15 +328,15 @@ Straight lines: scara line
   Drawing the 100 mm square with straight edges:
 
   scara home
-  scara goto 150 -50 +
-  scara line 250 -50
-  scara line 250 50
-  scara line 150 50
-  scara line 150 -50
+  scara goto 150 20 +
+  scara line 250 20
+  scara line 250 120
+  scara line 150 120
+  scara line 150 20
 
   The edges should be straight (put a ruler on them) and the arm should
-  not stutter halfway. Speed check: scara line 150 -150 then
-  time "scara line 150 150 10": 300 mm at 10 mm/s is about 30 s.
+  not stutter halfway. Speed check: scara line 100 20 then
+  time "scara line 300 20 10": 200 mm at 10 mm/s is about 20 s.
 
 G-code: scara gcode
 -------------------
@@ -344,9 +344,11 @@ G-code: scara gcode
   G0 X Y is goto, G1 X Y F is line (F in mm/min, kept for the next
   lines; default line_speed), G28 homes, G90 / G91 absolute / relative,
   G21 mm. A line with only X/Y repeats the last G0/G1. Comments ; and
-  ( ), N line numbers and % are skipped. M3/M5 (M106/M107) and Z are
-  accepted and ignored with a warning (no tip LED yet); anything else,
-  like G2 arcs or G20 inches, stops with the line number.
+  ( ), N line numbers and % are skipped. M3 / M5 (M106 / M107) switch
+  the tool on / off: the tip LED lights only while a G1 draws after M3,
+  never during G0 or G28 (see "Tip LED" below). Z is ignored with a
+  warning; anything else, like G2 arcs or G20 inches, stops with the
+  line number.
 
   The whole file is checked first: a syntax error or a point out of reach
   is reported with its line, and nothing moves. scara gcode -n FILE only
@@ -358,8 +360,9 @@ G-code: scara gcode
 
   scara gcode -n /usr/share/scara/square.gcode
   scara gcode /usr/share/scara/square.gcode
+  scara gcode /usr/share/scara/rgb.gcode   # each side a colour
 
-  A spiral around X200 Y0, 5 to 80 mm radius in 5 turns, as 360 G1
+  A spiral around X200 Y-90, 5 to 80 mm radius in 5 turns, as 360 G1
   segments (about a minute at 20 mm/s). In a file,
   consecutive G1 lines at the same feed run as one path without slowing
   down at the joins, as long as the direction turns by at most corner_deg
@@ -376,13 +379,58 @@ G-code: scara gcode
 
   scara gcode -
   G28
-  G0 X200 Y0                  -> moves, then ok
+  G0 X200 Y-90                -> moves, then ok
   G1 X200 Y80 F600            -> line at 10 mm/s, then ok
   G1 X500                     -> error: out of reach, nothing moves
 
   Drawings: docs/drawing.md turns an SVG into G-code
   (tools/svg2gcode.py) and copies it here over this USB cable
   (tools/bbb_send.py).
+Tip LED: scara led
+------------------
+  An RGB LED (4 legs), one resistor per colour. Common cathode (the long
+  leg to GND, the default):
+
+  P8_12 o──[ 330 Ohm ]──|>|── red   ─┐
+  P8_13 o──[ 150 Ohm ]──|>|── green ─┼──o P8_2 GND   (long leg)
+  P8_19 o──[ 150 Ohm ]──|>|── blue  ─┘
+
+  Common anode (the long leg to 3.3 V): the same resistors from each pin
+  to its leg, the long leg to P9_3 (3.3 V), and in /etc/tmc2209.conf
+
+  led_common = anode
+
+  The resistors keep each pin at about 4 mA, the most a BBB pin should
+  give: red drops about 2 V, green and blue about 2.7-3 V. A single red
+  LED still works on P8_12 alone (330 Ohm to P8_2). For a brighter LED,
+  drive each colour through an NPN transistor (e.g. 2N2222: pin --[1
+  kOhm]-- base, emitter to GND, LED leg and its resistor from 5 V (P9_7)
+  to the collector; common anode LED, led_common stays cathode).
+
+  P8_12 has no PWM, so red is only on or off (any value above 0 is full
+  red). P8_13 and P8_19 are EHRPWM2B / 2A at 10 kHz, so green and blue
+  have 256 levels. The device tree makes them the kernel LEDs tip-red,
+  tip-green and tip-blue (/sys/class/leds/), all off at boot. The kernel
+  holds the pins, so the LED stays on after the command exits.
+
+  scara led red                   # or green blue yellow cyan magenta
+                                  # orange purple white (= on)
+  scara led 0 255 128             # R G B, 0-255
+  scara led '#00ff80'             # the same, as in the drawing page
+  scara led off
+  scara led                       # prints led: R G B, or off
+
+  In G-code the LED follows M3 / M5, but only on the drawn lines: after
+  M3 it lights at the start of each G1 and goes off for any G0 (travel)
+  or G28; M5 switches it off. M150 R.. U.. B.. (0-255, as in Marlin; U is
+  green, a missing one is 0) sets the colour of the next G1 lines, or of
+  the one being drawn; it is white until the first M150. When the file ends, fails or is stopped
+  with Ctrl-C (or the console closes), scara switches it off. The square
+  has M3 / M5 around its four sides, so the LED is off while it goes to
+  the first corner and on along the edges:
+
+  scara gcode /usr/share/scara/square.gcode
+  scara gcode /usr/share/scara/rgb.gcode   # each side a colour
 
 Configuration: /etc/tmc2209.conf
 --------------------------------
