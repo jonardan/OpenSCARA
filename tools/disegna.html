@@ -147,6 +147,10 @@ details summary { cursor: pointer; font-size: 13px; }
 .custom span { position: absolute; inset: 0; display: grid; place-items: center; font: 600 15px/1 var(--font-body); color: var(--muted); pointer-events: none; }
 .custom[aria-pressed="true"] span { color: transparent; }
 input[type="file"] { display: none; }
+.progress { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.progress div { height: 100%; width: 0; background: var(--ok); transition: width .2s; }
+.rlog { margin: 0; max-height: 160px; overflow: auto; font: 11px/1.4 var(--font-mono); color: var(--muted); white-space: pre-wrap; }
+#rstatus b { color: var(--ink); font-weight: 600; }
 @media (max-width: 860px) {
   .app { grid-template-columns: minmax(0, 1fr); height: auto; }
   .board { flex: none; height: 62vh; min-height: 320px; }
@@ -229,6 +233,21 @@ input[type="file"] { display: none; }
       </details>
     </section>
 
+    <section class="card" aria-live="polite">
+      <h2>Robot (cavo USB)</h2>
+      <div class="row">
+        <button id="connect" title="Scegli la porta della BeagleBone (di solito ttyACM0)">Collega</button>
+        <button id="run" class="primary" disabled title="Copia il disegno sulla scheda ed eseguilo con scara gcode">▶ Disegna sul robot</button>
+        <button id="stop" disabled title="Ferma il braccio (come Ctrl-C)">■ Ferma</button>
+      </div>
+      <div class="progress" aria-hidden="true"><div id="bar"></div></div>
+      <p class="note" id="rstatus"></p>
+      <details>
+        <summary>Uscita della scheda</summary>
+        <pre class="rlog" id="rlog"></pre>
+      </details>
+    </section>
+
     <section class="card">
       <h2>Legenda</h2>
       <div class="legend">
@@ -250,6 +269,7 @@ input[type="file"] { display: none; }
           <label for="max2">Gomito max °<input type="number" id="max2" step="0.25"></label>
           <label for="h1">Home spalla °<input type="number" id="h1" step="0.25"></label>
           <label for="h2">Home gomito °<input type="number" id="h2" step="0.25"></label>
+          <label for="miny">Y minima (tavolo) mm<input type="number" id="miny" step="1"></label>
         </div>
         <div class="row" style="margin-top:8px"><button id="resetp">Ripristina valori</button></div>
       </details>
@@ -262,7 +282,7 @@ input[type="file"] { display: none; }
 "use strict";
 
 /* ---------- arm model: a port of kinematics.c and line.c ---------- */
-const DEFAULTS = { l1: 195.4, l2: 166.4, min: [-109.25, -171], max: [111.75, 166], home: [116.75, 171] };
+const DEFAULTS = { l1: 195.4, l2: 166.4, min: [-109.25, -171], max: [111.75, 166], home: [116.75, 171], minY: 0 };
 let P = JSON.parse(JSON.stringify(DEFAULTS));
 const DEG = Math.PI / 180, COS_EPS = 1e-9, LIM_EPS = 1e-6;
 const LINE_SEG_MM = 1, LINE_JUMP_DEG = 10, MIN_MOVE_MM = 0.01;
@@ -292,6 +312,7 @@ function solve(x, y, c2, sign) {
 function cosElbow(x, y) { return (x * x + y * y - P.l1 * P.l1 - P.l2 * P.l2) / (2 * P.l1 * P.l2); }
 /* elbow: 0 any, 1 positive, -1 negative. Returns {r, th} */
 function ik(x, y, elbow, near) {
+  if (y < P.minY - 1e-6) return { r: "below" };
   let c2 = cosElbow(x, y);
   if (c2 > 1 + COS_EPS) return { r: "far" };
   if (c2 < -1 - COS_EPS) return { r: "close" };
@@ -327,7 +348,28 @@ const WHY = {
   close: "troppo vicino alla spalla",
   limits: "fuori dai limiti dei giunti",
   jump: "la linea passa troppo vicino alla spalla",
+  below: "sotto l'asse X: la punta toccherebbe il tavolo",
 };
+/* kin_joint_move(): a joint move swings the tip along a curve; the first point of it below the table, or null */
+function jointBelow(a, b) {
+  const n = Math.max(1, Math.ceil(Math.max(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1]))));
+  for (let i = 0; i <= n; i++) {
+    const p = fk([a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n]);
+    if (p[1] < P.minY - 1e-6) return p;
+  }
+  return null;
+}
+/* plan_g0() in scara.c: joint move, else the other elbow side, else a straight line */
+function planG0(th, x, y) {
+  const k = ik(x, y, 0, th);
+  if (k.r !== "ok") return { r: k.r, bad: [x, y] };
+  if (!jointBelow(th, k.th)) return { r: "ok", th: k.th };
+  const alt = ik(x, y, k.th[1] < 0 ? 1 : -1, null);
+  if (alt.r === "ok" && !jointBelow(th, alt.th)) return { r: "ok", th: alt.th };
+  const lp = linePlan(th, x, y);
+  if (lp.r === "ok") return { r: "ok", th: lp.pts[lp.pts.length - 1], line: lp.pts };
+  return { r: "below", bad: jointBelow(th, k.th) };
+}
 
 /* ---------- drawing state ---------- */
 const SAMPLE = (() => {
@@ -335,10 +377,10 @@ const SAMPLE = (() => {
   const star = [];
   for (let k = 0; k <= 10; k++) {
     const a = (90 + k * 36) * DEG, r = k % 2 ? 26 : 62;
-    star.push([200 + r * Math.cos(a), r * Math.sin(a)]);
+    star.push([200 + r * Math.cos(a), 90 + r * Math.sin(a)]);
   }
   s.push({ kind: "poly", pts: star, color: "#ffff00" });
-  s.push({ kind: "circle", pts: circlePts(200, 0, 75), color: "#00ffff" });
+  s.push({ kind: "circle", pts: circlePts(200, 90, 75), color: "#00ffff" });
   return s;
 })();
 /* LED colours: the same names as "scara led NAME" */
@@ -352,7 +394,7 @@ let strokes = [];
 let undoStack = [], redoStack = [];
 let isSample = false;
 let tool = "free", snap = false, rot = 0;
-let view = { s: 1, cu: 120, cv: 0 };
+let view = { s: 1, cu: 120, cv: 90 };
 let draft = null;
 let hover = null;
 let sim = null;
@@ -380,7 +422,7 @@ function restore() {
     strokes = (d.strokes || []).map(s => s.color ? s : Object.assign(s, { color: DEFAULT_COLOR }));
     isSample = !!d.isSample;
     if (/^#[0-9a-f]{6}$/i.test(d.color || "")) color = d.color.toLowerCase();
-    if (d.P) P = d.P;
+    if (d.P) P = Object.assign(JSON.parse(JSON.stringify(DEFAULTS)), d.P);
     if (d.feed) $("feed").value = d.feed;
     if (typeof d.m3 === "boolean") $("m3").checked = d.m3;
     if (d.fname) $("fname").value = d.fname;
@@ -400,7 +442,7 @@ function s2w(sx, sy) { return fromDisp((sx - W / 2) / view.s + view.cu, -(sy - H
 function fitView() {
   const R = P.l1 + P.l2;
   /* bounding box of the reach that matters: front half plus the shoulder's swing */
-  const box = [[-R * 0.75, -R], [R, R]];
+  const box = [[-R * 0.75, Math.max(-R, P.minY - 40)], [R, R]];
   const corners = [[box[0][0], box[0][1]], [box[1][0], box[1][1]], [box[0][0], box[1][1]], [box[1][0], box[0][1]]].map(p => toDisp(p[0], p[1]));
   const us = corners.map(c => c[0]), vs = corners.map(c => c[1]);
   const du = Math.max(...us) - Math.min(...us), dv = Math.max(...vs) - Math.min(...vs);
@@ -439,6 +481,7 @@ function workspaceImage() {
   for (let py = 0; py < h; py++) {
     for (let px = 0; px < w; px++) {
       const [x, y] = s2w(px + 0.5, py + 0.5);
+      if (y < P.minY) continue;
       let c2 = cosElbow(x, y);
       if (c2 > 1 || c2 < -1) continue;
       const a = solve(x, y, c2, 1) !== null, b = solve(x, y, c2, -1) !== null;
@@ -468,17 +511,23 @@ function simulate() {
     if (Math.hypot(pts[0][0] - at[0], pts[0][1] - at[1]) >= MIN_MOVE_MM) {
       travels.push([at, pts[0]]);
       travelLen += Math.hypot(pts[0][0] - at[0], pts[0][1] - at[1]);
-      const k = ik(pts[0][0], pts[0][1], 0, th);
+      const k = planG0(th, pts[0][0], pts[0][1]);
       if (k.r !== "ok") {
-        errors.push({ i, at: pts[0], msg: `inizio ${WHY[k.r]}` }); badStroke.add(i);
+        errors.push({ i, at: k.bad, msg: k.r === "below" ? `lo spostamento G0 passa ${WHY.below}` : `inizio ${WHY[k.r]}` }); badStroke.add(i);
         at = pts[pts.length - 1];
         const e = ik(at[0], at[1], 0, th); if (e.r === "ok") th = e.th;
         return;
       }
-      const dt = Math.max(Math.abs(k.th[0] - th[0]) / JOINT_DEG_S[0], Math.abs(k.th[1] - th[1]) / JOINT_DEG_S[1]);
-      const n = Math.max(1, Math.ceil(Math.max(Math.abs(k.th[0] - th[0]), Math.abs(k.th[1] - th[1]))));
-      for (let j = 1; j <= n; j++) frames.push({ t: t + dt * j / n, th: [th[0] + (k.th[0] - th[0]) * j / n, th[1] + (k.th[1] - th[1]) * j / n], on: false });
-      t += dt; th = k.th; at = pts[0];
+      const jdt = (a, b) => Math.max(Math.abs(b[0] - a[0]) / JOINT_DEG_S[0], Math.abs(b[1] - a[1]) / JOINT_DEG_S[1]);
+      if (k.line) {
+        for (let q = 1; q < k.line.length; q++) { t += jdt(k.line[q - 1], k.line[q]); frames.push({ t, th: k.line[q], on: false }); }
+      } else {
+        const dt = jdt(th, k.th);
+        const n = Math.max(1, Math.ceil(Math.max(Math.abs(k.th[0] - th[0]), Math.abs(k.th[1] - th[1]))));
+        for (let j = 1; j <= n; j++) frames.push({ t: t + dt * j / n, th: [th[0] + (k.th[0] - th[0]) * j / n, th[1] + (k.th[1] - th[1]) * j / n], on: false });
+        t += dt;
+      }
+      th = k.th; at = pts[0];
     }
     sides[i] = th[1] < 0 ? "−" : "+";
     for (let j = 1; j < pts.length; j++) {
@@ -654,6 +703,15 @@ function draw() {
     const p = w2s((R + 10) * Math.cos(a * DEG), (R + 10) * Math.sin(a * DEG));
     const label = `spalla ${a}°`, tw = ctx.measureText(label).width;
     ctx.fillText(label, p[0] < o[0] ? p[0] - tw - 4 : p[0] + 4, p[1] + (p[1] < o[1] ? -2 : 10));
+  }
+  /* the table: the tip stays at y >= minY */
+  {
+    const a = w2s(-R - 20, P.minY), b = w2s(R + 20, P.minY);
+    ctx.save(); ctx.strokeStyle = C.bad; ctx.lineWidth = 1.5; ctx.setLineDash([8, 4]);
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); ctx.restore();
+    ctx.fillStyle = C.bad; const lp = w2s(-R * 0.7, P.minY);
+    ctx.fillText("tavolo", lp[0] + 4, lp[1] + (rot ? -4 : 13));
+    ctx.fillStyle = C.muted;
   }
   /* X axis and origin */
   ctx.strokeStyle = C.muted; ctx.lineWidth = 1;
@@ -942,7 +1000,7 @@ function setColor(hex) {
 $("custom").addEventListener("input", e => setColor(e.target.value));
 
 /* ---------- arm parameters ---------- */
-const PF = { l1: ["l1"], l2: ["l2"], min1: ["min", 0], max1: ["max", 0], min2: ["min", 1], max2: ["max", 1], h1: ["home", 0], h2: ["home", 1] };
+const PF = { l1: ["l1"], l2: ["l2"], min1: ["min", 0], max1: ["max", 0], min2: ["min", 1], max2: ["max", 1], h1: ["home", 0], h2: ["home", 1], miny: ["minY"] };
 function showParams() { for (const [id, [k, i]] of Object.entries(PF)) $(id).value = i === undefined ? P[k] : P[k][i]; }
 for (const [id, [k, i]] of Object.entries(PF)) $(id).addEventListener("change", () => {
   const v = parseFloat($(id).value); if (!isFinite(v)) return;
@@ -972,6 +1030,7 @@ function updatePanel() {
   $("out").value = gcode();
   $("undo").disabled = !undoStack.length; $("redo").disabled = !redoStack.length;
   $("play").disabled = !n;
+  robotButtons();
   updateHint();
 }
 
@@ -1035,6 +1094,144 @@ $("load").onchange = e => {
   rd.readAsText(f); e.target.value = "";
 };
 
+/* ---------- robot over the USB cable (Web Serial, Chrome / Edge) ----------
+ * Like tools/bbb_send.py: get a shell prompt on the board's console (logging
+ * in as root if asked), type the file in as a here-document one line per
+ * "> " prompt, check its line count, then run scara gcode on it and follow
+ * the "N: line" it prints. Ferma sends Ctrl-C, which stops scara like on
+ * the keyboard (it decelerates and switches the LED off). */
+const EOF_MARK = "SCARA_EOF_7f3a", BOARD_FILE = "/tmp/disegno.gcode";
+const enc = new TextEncoder();
+let port = null, writer = null, reader = null, rx = "", partial = "", logLines = [], job = null;
+function rstatus(html) { $("rstatus").innerHTML = html; }
+function robotButtons() {
+  $("connect").textContent = port ? "Scollega" : "Collega";
+  $("run").disabled = !port || !!job || !strokes.length;
+  $("stop").disabled = !port;
+}
+function onBoardText(t) {
+  rx += t;
+  const parts = (partial + t).split("\n");
+  partial = parts.pop();
+  for (let l of parts) {
+    l = l.replace(/\r/g, "");
+    logLines.push(l); if (logLines.length > 300) logLines.shift();
+    if (job && job.running) {
+      const m = l.match(/^(\d+): /);
+      if (m) job.line = Math.max(job.line, +m[1]);
+      if (/^error:|^stopped|^interrupted/.test(l)) job.err = l.replace(/^error: /, "");
+    }
+  }
+  const lg = $("rlog"); lg.textContent = logLines.slice(-60).join("\n"); lg.scrollTop = lg.scrollHeight;
+  if (job && job.running) showProgress();
+}
+async function readLoop(p) {
+  const dec = new TextDecoder();
+  while (p === port && p.readable) {
+    const r = reader = p.readable.getReader();
+    try {
+      for (;;) { const { value, done } = await r.read(); if (done) break; onBoardText(dec.decode(value, { stream: true })); }
+    } catch (e) { /* cable pulled or port closed */ } finally { r.releaseLock(); reader = null; }
+    if (p === port) { port = null; writer = null; rstatus("Scheda scollegata."); if (job) job.abort = true; robotButtons(); }
+  }
+}
+function send(t) { return writer.write(enc.encode(t)); }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+/* Wait until rx matches re; drop rx up to the end of the match */
+async function waitFor(re, ms) {
+  const t0 = performance.now();
+  for (;;) {
+    const m = rx.match(re);
+    if (m) { rx = rx.slice(m.index + m[0].length); return m; }
+    if (job && job.abort) throw new Error("Fermato.");
+    if (!port) throw new Error("La scheda si è scollegata.");
+    if (performance.now() - t0 > ms) throw new Error("La scheda non risponde.");
+    await sleep(15);
+  }
+}
+function showProgress() {
+  const j = job, n = j.total || 1;
+  const frac = j.running ? j.line / n : j.sent / n;
+  $("bar").style.width = `${Math.min(100, frac * 100).toFixed(1)}%`;
+  if (j.running) {
+    const st = j.lineStroke[j.line] || 0;
+    rstatus(`Disegno in corso: <b>tratto ${st} di ${j.strokes}</b>, riga ${j.line} di ${n}.`);
+  } else rstatus(`Copio il disegno sulla scheda: <b>${j.sent} di ${n}</b> righe.`);
+}
+async function connectRobot() {
+  if (port) {
+    const p = port, w = writer, r = reader; port = null; writer = null;
+    if (job) job.abort = true;
+    try { if (r) await r.cancel(); w.releaseLock(); await p.close(); } catch (e) { /* already gone */ }
+    rstatus("Scollegato."); robotButtons(); return;
+  }
+  if (!("serial" in navigator)) {
+    rstatus("Questo browser non può usare il cavo USB: apri <code>tools/disegna.html</code> dal PC con Chrome o Edge.");
+    return;
+  }
+  try {
+    const p = await navigator.serial.requestPort();
+    await p.open({ baudRate: 115200 });
+    port = p; writer = p.writable.getWriter(); rx = ""; partial = "";
+    readLoop(p);
+    rstatus("Collegato. Premi <b>Disegna sul robot</b> (chiudi picocom se è aperto).");
+  } catch (e) {
+    if (e && e.name === "NotFoundError") rstatus("Nessuna porta scelta.");
+    else if (e && e.name === "SecurityError") rstatus("Qui il cavo USB non è permesso: apri <code>tools/disegna.html</code> dal PC con Chrome o Edge.");
+    else rstatus(`Non riesco ad aprire la porta: ${e && e.message ? e.message : e}. È aperta in picocom? Su Linux serve il gruppo <code>dialout</code>.`);
+  }
+  robotButtons();
+}
+async function runRobot() {
+  if (!port || job) return;
+  if (sim.errors.length) { rstatus("Il disegno ha tratti in rosso: scara li rifiuterebbe. Correggili prima."); return; }
+  const text = gcode(), lines = text.replace(/\n$/, "").split("\n");
+  /* which stroke each file line belongs to, for the progress line */
+  const lineStroke = []; let st = 0;
+  lines.forEach((l, i) => { const m = l.match(/^; tratto (\d+)/); if (m) st = +m[1]; lineStroke[i + 1] = st; });
+  job = { total: lines.length, sent: 0, line: 0, running: false, abort: false, err: "", lineStroke, strokes: strokes.length };
+  robotButtons(); stopAnim();
+  try {
+    /* a shell prompt: Ctrl-C a half-typed line, log in if the board asks */
+    rx = ""; await send("\x03\n"); await sleep(600);
+    if (/login:\s*$/.test(rx)) { await send("root\n"); await sleep(1200); }
+    if (/Password:\s*$/.test(rx)) { await send("\n"); await sleep(1200); }
+    rx = ""; await send("echo READY_$((40+2))\n");
+    await waitFor(/READY_42/, 5000);
+    await sleep(200); rx = "";
+    await send(`cat > ${BOARD_FILE} <<'${EOF_MARK}'\n`);
+    for (const l of lines) {
+      await waitFor(/\n> /, 5000);
+      await send(l + "\n");
+      job.sent++; if (job.sent % 20 === 0 || job.sent === lines.length) showProgress();
+    }
+    await waitFor(/\n> /, 5000);
+    await send(EOF_MARK + "\n"); await sleep(300); rx = "";
+    await send(`echo LINES_$(wc -l < ${BOARD_FILE})\n`);
+    const m = await waitFor(/LINES_(\d+)/, 5000);
+    if (+m[1] !== lines.length) throw new Error(`Copia incompleta: ${m[1]} righe su ${lines.length}. Riprova.`);
+    job.running = true; showProgress();
+    await send(`scara gcode ${BOARD_FILE}; echo SCARA_EXIT_$?\n`);
+    const e = await waitFor(/SCARA_EXIT_(\d+)/, 6 * 3600 * 1000);
+    job.running = false;
+    if (+e[1] === 0) { $("bar").style.width = "100%"; rstatus(`<b>Disegno finito.</b> ${job.strokes} tratti.`); }
+    else rstatus(`<span style="color:var(--bad)">scara si è fermato: ${job.err || "vedi l'uscita della scheda"}</span>`);
+  } catch (err) {
+    rstatus(`<span style="color:var(--bad)">${err.message}</span>`);
+  } finally {
+    job = null; robotButtons();
+  }
+}
+$("connect").onclick = connectRobot;
+$("run").onclick = runRobot;
+$("stop").onclick = async () => {
+  if (!port) return;
+  if (job) job.abort = !job.running;   /* while copying: give up; while drawing: scara stops itself */
+  try { await send("\x03"); } catch (e) { /* port gone */ }
+  rstatus("Ferma inviato (Ctrl-C).");
+};
+if (navigator.serial) navigator.serial.addEventListener("disconnect", e => { if (e.target === port) { port = null; writer = null; rstatus("Scheda scollegata."); robotButtons(); } });
+
 /* ---------- theme changes ---------- */
 const mq = window.matchMedia("(prefers-color-scheme: dark)");
 const retheme = () => { readColors(); draw(); };
@@ -1048,6 +1245,8 @@ $("rot").setAttribute("aria-pressed", !!rot); $("snap").setAttribute("aria-press
 readColors();
 setColor(color);
 sim = simulate(); updatePanel();
+rstatus("serial" in navigator ? "Collega la BeagleBone con il cavo mini-USB e premi <b>Collega</b>."
+  : "Per disegnare dal cavo USB apri <code>tools/disegna.html</code> dal PC con Chrome o Edge.");
 new ResizeObserver(resize).observe($("board"));
 if (document.fonts) document.fonts.ready.then(draw);
 window.__scara = { ik, linePlan, simulate, gcode, parseGcode, fk, setStrokes: s => { strokes = s; changed(); } };

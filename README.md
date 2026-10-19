@@ -52,8 +52,10 @@ scara gcode /usr/share/scara/spiral.gcode    # draw a spiral
 ```
 
 Draw by hand inside the arm's reach: open `tools/disegna.html` in a
-browser, draw with a colour per stroke, and save the G-code (details in
-the drawing guide).
+browser, draw with a colour per stroke, and save the G-code, or, in
+Chrome or Edge with the board on the USB cable, press "Disegna sul robot"
+and it draws straight away (details in the drawing guide). The tip always
+stays above the X axis (`min_y_mm`), so it never hits the table.
 
 Draw your own picture from an SVG, on the PC:
 

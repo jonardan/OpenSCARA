@@ -115,6 +115,8 @@ static int get_arm(struct arm *a)
 		a->min[j] = motors[j].min_angle;
 		a->max[j] = motors[j].max_angle;
 	}
+	a->floor_on = !motors[0].min_y_off;
+	a->floor_y = motors[0].min_y_mm;
 	return 0;
 }
 
@@ -291,22 +293,111 @@ static int cmd_joint(int argc, char **argv)
 	return move_to_angles(target, rpm);
 }
 
-/* The tip to x, y: IK, then the same joint move as 'joint' */
+static int line_to(const struct arm *a, double x, double y, double speed);
+
+/*
+ * A straight line from the joint angles th[] to x, y, on paper (line.c):
+ * KIN_OK with th[] set to where it ends, or the first bad point in *bx, *by.
+ */
+static enum kin_result plan_line(const struct arm *a, double x, double y,
+				 double th[NJOINTS], double *bx, double *by)
+{
+	double x0, y0, (*pts)[NJOINTS];
+	enum kin_result r;
+	int npts;
+
+	*bx = x;
+	*by = y;
+	kin_forward(a, th, &x0, &y0);
+	npts = line_npts(hypot(x - x0, y - y0), LINE_SEG_MM);
+	pts = malloc(npts * sizeof(*pts));
+	if (!pts) {
+		err("out of memory");
+		exit(1);
+	}
+	r = line_plan(a, th, x, y, npts, pts, bx, by);
+	if (r == KIN_OK)
+		memcpy(th, pts[npts - 1], sizeof(pts[0]));
+	free(pts);
+	return r;
+}
+
+/*
+ * How a goto (G0) gets the tip from the joint angles from[] to x, y.  A
+ * joint move turns both joints together, so the tip swings along a curve
+ * that can dip below min_y_mm even when both ends are above it.  In order:
+ * a joint move to the IK solution nearest from[], one to the other elbow
+ * side (with ELBOW_ANY), or a straight line, which can't dip since the
+ * table is a straight edge.  KIN_OK with to[] the end angles and
+ * *straight set for the line; else the first bad point in *bx, *by.
+ * from and to may be the same array.
+ */
+static enum kin_result plan_g0(const struct arm *a, double x, double y,
+			       enum elbow side, const double from[NJOINTS],
+			       double to[NJOINTS], int *straight, double *bx,
+			       double *by)
+{
+	double start[NJOINTS], th[NJOINTS], alt[NJOINTS];
+	enum kin_result r;
+
+	memcpy(start, from, sizeof(start));
+	*straight = 0;
+	*bx = x;
+	*by = y;
+	r = kin_inverse(a, x, y, side, start, th);
+	if (r != KIN_OK)
+		return r;
+	if (kin_joint_move(a, start, th, bx, by) == KIN_OK) {
+		memcpy(to, th, sizeof(th));
+		return KIN_OK;
+	}
+	if (side == ELBOW_ANY &&
+	    kin_inverse(a, x, y, th[1] < 0 ? ELBOW_POS : ELBOW_NEG, NULL,
+			alt) == KIN_OK &&
+	    kin_joint_move(a, start, alt, bx, by) == KIN_OK) {
+		memcpy(to, alt, sizeof(alt));
+		return KIN_OK;
+	}
+	r = plan_line(a, x, y, start, bx, by);
+	if (r != KIN_OK) {
+		/* Say why the joint move was refused, not the line */
+		kin_joint_move(a, from, th, bx, by);
+		return KIN_BELOW;
+	}
+	memcpy(to, start, sizeof(start));
+	*straight = 1;
+	return KIN_OK;
+}
+
+/* G0 / goto as a straight line: as fast as the motors' rpm allows */
+#define G0_LINE_SPEED	1000	/* mm/s, lowered by move_path */
+
+/*
+ * The tip to x, y: IK, then the same joint move as 'joint', or a straight
+ * line when the joint move would take the tip below the table (plan_g0)
+ */
 static int goto_xy(const struct arm *a, double x, double y, enum elbow side,
 		   double rpm)
 {
-	double th[NJOINTS], now[NJOINTS];
+	double th[NJOINTS], now[NJOINTS], bx, by;
 	enum kin_result r;
+	int straight;
 
 	if (get_angles(now)) {
 		err("the arm is not homed; run 'scara home'");
 		return -1;
 	}
-	r = kin_inverse(a, x, y, side, now, th);
+	r = plan_g0(a, x, y, side, now, th, &straight, &bx, &by);
 	if (r != KIN_OK) {
-		err("%.2f, %.2f: %s", x, y, kin_strerror(r));
+		if (r == KIN_BELOW)
+			err("%.2f, %.2f: the move would take the tip to %.2f, "
+			    "%.2f: %s", x, y, bx, by, kin_strerror(r));
+		else
+			err("%.2f, %.2f: %s", x, y, kin_strerror(r));
 		return -1;
 	}
+	if (straight)
+		return line_to(a, x, y, G0_LINE_SPEED);
 	return move_to_angles(th, rpm);
 }
 
@@ -410,7 +501,7 @@ static int path_to(const struct arm *a, int n, const double (*xy)[2],
 	if (move_path(NJOINTS, both, npts, pts, dist, &speed,
 		      motors[0].line_accel, &interrupted))
 		goto out;
-	if (speed < asked)
+	if (speed < asked && asked < G0_LINE_SPEED)
 		printf("speed lowered to %.1f mm/s: a motor would go over its "
 		       "rpm\n", speed);
 	if (interrupted) {
@@ -754,26 +845,11 @@ static enum kin_result plan_move(const struct arm *a, int motion, double x,
 				 double y, double th[NJOINTS], double *bx,
 				 double *by)
 {
-	double x0, y0, (*pts)[NJOINTS];
-	enum kin_result r;
-	int npts;
+	int straight;
 
-	*bx = x;
-	*by = y;
-	if (!motion)
-		return kin_inverse(a, x, y, ELBOW_ANY, th, th);
-	kin_forward(a, th, &x0, &y0);
-	npts = line_npts(hypot(x - x0, y - y0), LINE_SEG_MM);
-	pts = malloc(npts * sizeof(*pts));
-	if (!pts) {
-		err("out of memory");
-		exit(1);
-	}
-	r = line_plan(a, th, x, y, npts, pts, bx, by);
-	if (r == KIN_OK)
-		memcpy(th, pts[npts - 1], sizeof(pts[0]));
-	free(pts);
-	return r;
+	if (motion)
+		return plan_line(a, x, y, th, bx, by);
+	return plan_g0(a, x, y, ELBOW_ANY, th, th, &straight, bx, by);
 }
 
 /* Where a run of the program is, carried from one line to the next */

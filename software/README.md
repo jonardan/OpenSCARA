@@ -281,6 +281,14 @@ with no hardware code, tested on the PC with `make test` like the math.
 G0 as `goto`, G1 as `line` and G28 as `home`. `scara gcode -` streams stdin
 instead: each line is checked from where the arm is, run, and answered `ok`
 (or `error`), so a PC-side sender can feed a drawing over the console.
+The tip never goes below `min_y_mm` (0: the X axis, the table). `ik`
+refuses such points, `line` and G1 check every 1 mm point, and a `goto` or
+G0 checks the curve its joint move swings the tip along: if it would dip
+below, the other elbow side is tried, then a straight line
+(`kin_joint_move` in `kinematics.c`, `plan_g0` in `scara.c`). Homing
+can't be checked (the pose before it may be unknown): `scara home` folds
+the elbow, then turns the shoulder up to its switch.
+
 In a file, consecutive G1 lines that bend by at most `corner_deg` run as one
 `move_path`, so curves made of short segments don't stop at every join. A
 sample square, a spiral of G1 segments and an RGB square (`rgb.gcode`)

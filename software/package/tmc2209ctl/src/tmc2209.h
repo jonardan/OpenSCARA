@@ -80,6 +80,8 @@ struct config {
 	double line_speed;	/* default tip speed for lines, mm/s (shared) */
 	double line_accel;	/* tip acceleration for lines, mm/s^2 (shared) */
 	double corner_deg;	/* G-code: G1 lines bending less run as one */
+	double min_y_mm;	/* the tip never goes below this y (shared) */
+	int min_y_off;		/* min_y_mm = off: no such limit */
 	/* tip RGB LED: names in /sys/class/leds, and its common pin (shared) */
 	char led_red[32], led_green[32], led_blue[32];
 	int led_anode;		/* 1: common anode (pin low = on) */

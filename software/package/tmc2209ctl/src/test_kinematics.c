@@ -140,8 +140,42 @@ static void test_auto_side(void)
 	      "ELBOW_ANY picked %f %f", th[0], th[1]);
 }
 
+/* The table: the tip stays at y >= 0, on single points and joint moves */
+static void test_floor(void)
+{
+	struct arm f = arm;
+	double th[2], from[2], to[2], bx, by;
+
+	f.floor_on = 1;
+	f.floor_y = 0;
+	CHECK(kin_inverse(&f, 250, -1, ELBOW_ANY, NULL, th) == KIN_BELOW,
+	      "y -1 should be below the table");
+	CHECK(kin_inverse(&f, 250, 0, ELBOW_ANY, NULL, th) == KIN_OK,
+	      "y 0 is on the table edge: allowed");
+	CHECK(kin_inverse(&arm, 250, -1, ELBOW_ANY, NULL, th) == KIN_OK,
+	      "no floor: y -1 is fine");
+	f.floor_y = 20;
+	CHECK(kin_inverse(&f, 250, 10, ELBOW_ANY, NULL, th) == KIN_BELOW,
+	      "floor_y 20");
+	f.floor_y = 0;
+
+	/* Both ends above the table, the joint-space path between them dips */
+	CHECK(kin_inverse(&f, 180, 120, ELBOW_POS, NULL, from) == KIN_OK &&
+	      kin_inverse(&f, 72, 7, ELBOW_NEG, NULL, to) == KIN_OK,
+	      "both ends above the table");
+	CHECK(kin_joint_move(&f, from, to, &bx, &by) == KIN_BELOW && by < 0,
+	      "elbow flip should dip below: %f %f", bx, by);
+	CHECK(kin_joint_move(&arm, from, to, &bx, &by) == KIN_OK,
+	      "no floor: any joint move is fine");
+	CHECK(kin_inverse(&f, 300, 20, ELBOW_POS, NULL, from) == KIN_OK &&
+	      kin_inverse(&f, 250, 80, ELBOW_POS, NULL, to) == KIN_OK &&
+	      kin_joint_move(&f, from, to, &bx, &by) == KIN_OK,
+	      "same side, above the table: ok");
+}
+
 int main(void)
 {
+	test_floor();
 	test_known_points();
 	test_unreachable();
 	test_round_trip();

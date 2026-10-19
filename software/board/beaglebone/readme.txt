@@ -301,10 +301,10 @@ Moving to X/Y: scara goto
   pen (or the LED) on it, then
 
   scara home
-  scara goto 150 -50 +            # mark the dot, then the next corner
-  scara goto 250 -50 +
-  scara goto 250 50 +
-  scara goto 150 50 +
+  scara goto 150 20 +             # mark the dot, then the next corner
+  scara goto 250 20 +
+  scara goto 250 120 +
+  scara goto 150 120 +
 
   Measure the four sides (100 mm) and both diagonals (141.4 mm); this
   needs no origin on the paper. Sides too long or too short, more so on
@@ -328,15 +328,15 @@ Straight lines: scara line
   Drawing the 100 mm square with straight edges:
 
   scara home
-  scara goto 150 -50 +
-  scara line 250 -50
-  scara line 250 50
-  scara line 150 50
-  scara line 150 -50
+  scara goto 150 20 +
+  scara line 250 20
+  scara line 250 120
+  scara line 150 120
+  scara line 150 20
 
   The edges should be straight (put a ruler on them) and the arm should
-  not stutter halfway. Speed check: scara line 150 -150 then
-  time "scara line 150 150 10": 300 mm at 10 mm/s is about 30 s.
+  not stutter halfway. Speed check: scara line 100 20 then
+  time "scara line 300 20 10": 200 mm at 10 mm/s is about 20 s.
 
 G-code: scara gcode
 -------------------
@@ -362,7 +362,7 @@ G-code: scara gcode
   scara gcode /usr/share/scara/square.gcode
   scara gcode /usr/share/scara/rgb.gcode   # each side a colour
 
-  A spiral around X200 Y0, 5 to 80 mm radius in 5 turns, as 360 G1
+  A spiral around X200 Y90, 5 to 80 mm radius in 5 turns, as 360 G1
   segments (about a minute at 20 mm/s). In a file,
   consecutive G1 lines at the same feed run as one path without slowing
   down at the joins, as long as the direction turns by at most corner_deg
@@ -379,7 +379,7 @@ G-code: scara gcode
 
   scara gcode -
   G28
-  G0 X200 Y0                  -> moves, then ok
+  G0 X200 Y90                 -> moves, then ok
   G1 X200 Y80 F600            -> line at 10 mm/s, then ok
   G1 X500                     -> error: out of reach, nothing moves
 

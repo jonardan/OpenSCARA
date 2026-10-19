@@ -23,6 +23,7 @@
  */
 #define COS_EPS	1e-9
 #define LIM_EPS	1e-6	/* deg */
+#define FLOOR_EPS 1e-6	/* mm */
 
 void kin_forward(const struct arm *a, const double th[2], double *x, double *y)
 {
@@ -78,6 +79,8 @@ enum kin_result kin_inverse(const struct arm *a, double x, double y,
 	double r2 = x * x + y * y, c2, pos[2], neg[2];
 	int pos_ok, neg_ok;
 
+	if (a->floor_on && y < a->floor_y - FLOOR_EPS)
+		return KIN_BELOW;
 	c2 = (r2 - a->l1 * a->l1 - a->l2 * a->l2) / (2.0 * a->l1 * a->l2);
 	if (c2 > 1.0 + COS_EPS)
 		return KIN_TOO_FAR;
@@ -101,6 +104,30 @@ enum kin_result kin_inverse(const struct arm *a, double x, double y,
 	return KIN_OK;
 }
 
+enum kin_result kin_joint_move(const struct arm *a, const double from[2],
+			       const double to[2], double *bx, double *by)
+{
+	double d = fmax(fabs(to[0] - from[0]), fabs(to[1] - from[1]));
+	int n = (int)ceil(d), i;
+	double th[2], x, y;
+
+	if (!a->floor_on)
+		return KIN_OK;
+	for (i = 0; i <= n; i++) {
+		double t = n ? (double)i / n : 1;
+
+		th[0] = from[0] + (to[0] - from[0]) * t;
+		th[1] = from[1] + (to[1] - from[1]) * t;
+		kin_forward(a, th, &x, &y);
+		if (y < a->floor_y - FLOOR_EPS) {
+			*bx = x;
+			*by = y;
+			return KIN_BELOW;
+		}
+	}
+	return KIN_OK;
+}
+
 const char *kin_strerror(enum kin_result r)
 {
 	switch (r) {
@@ -109,6 +136,7 @@ const char *kin_strerror(enum kin_result r)
 	case KIN_TOO_CLOSE: return "out of reach (too close to the shoulder)";
 	case KIN_LIMITS: return "reachable only outside the joint limits";
 	case KIN_JUMP: return "the line passes too close to the shoulder";
+	case KIN_BELOW: return "below min_y_mm (the tip would hit the table)";
 	}
 	return "unknown error";
 }

@@ -11,7 +11,7 @@ Text: in Inkscape use Extensions > Text > Hershey Text (single-line fonts);
 other text must be turned into paths first (Path > Object to Path).
 
     python3 tools/svg2gcode.py drawing.svg -o drawing.gcode
-    python3 tools/svg2gcode.py logo.svg --size 120 --center 210,0 --feed 900
+    python3 tools/svg2gcode.py logo.svg --size 120 --center 210,100 --feed 900
 
 Python standard library only.
 """
@@ -308,8 +308,8 @@ def main():
     ap.add_argument("-o", "--output", help="G-code file (default: stdout)")
     ap.add_argument("--size", type=float, default=150,
                     help="longer side of the drawing, mm (default 150)")
-    ap.add_argument("--center", default="200,0",
-                    help="centre of the drawing X,Y in mm (default 200,0)")
+    ap.add_argument("--center", default="200,90",
+                    help="centre of the drawing X,Y in mm (default 200,90: above the X axis)")
     ap.add_argument("--rotate", type=float, default=0,
                     help="turn the drawing counter-clockwise, degrees")
     ap.add_argument("--feed", type=float, default=1200,
