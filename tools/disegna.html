@@ -370,7 +370,9 @@ function planG0(th, x, y) {
   if (alt.r === "ok") sols.push(alt.th);
   for (const s of sols) if (!jointCross(th, s)) return { r: "ok", th: s, moves: [s] };
   for (const k2 of [0, 1]) for (const s of sols) {
-    const v = k2 ? [th[0], s[1]] : [s[0], th[1]];
+    /* the joint that waits is brought inside its limits: home (elbow 171) is past max (166) */
+    const lim = (j, t) => Math.max(P.min[j], Math.min(P.max[j], t));
+    const v = k2 ? [lim(0, th[0]), s[1]] : [s[0], lim(1, th[1])];
     if (!jointCross(th, v) && !jointCross(v, s)) return { r: "ok", th: s, moves: [v, s] };
   }
   const lp = linePlan(th, x, y);

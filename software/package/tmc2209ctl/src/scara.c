@@ -366,9 +366,15 @@ static enum kin_result plan_g0(const struct arm *a, double x, double y,
 		}
 	for (k = 0; k < 2; k++) {
 		for (i = 0; i < n; i++) {
-			/* k = 0: shoulder first; k = 1: elbow first */
-			v[0] = k ? from[0] : sol[i][0];
-			v[1] = k ? sol[i][1] : from[1];
+			/*
+			 * k = 0: shoulder first; k = 1: elbow first.  The
+			 * joint that waits is brought inside its limits: home
+			 * (elbow 171) is past max_angle (166).
+			 */
+			v[0] = k ? fmax(a->min[0], fmin(a->max[0], from[0])) :
+				   sol[i][0];
+			v[1] = k ? sol[i][1] :
+				   fmax(a->min[1], fmin(a->max[1], from[1]));
 			if (kin_joint_move(a, from, v, &tx, &ty) == KIN_OK &&
 			    kin_joint_move(a, v, sol[i], &tx, &ty) == KIN_OK) {
 				p->via = 1;
