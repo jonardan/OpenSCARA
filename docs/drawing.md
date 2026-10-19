@@ -15,7 +15,9 @@ Both tools are plain Python 3, standard library only.
 Open `tools/disegna.html` in any browser (PC or phone, works offline). It
 shows the area the tip can reach with the joint limits of `tmc2209.conf`
 (darker: both elbow sides, lighter: one side only), lets you draw in it
-(freehand, line, polyline, rectangle, circle) and saves the drawing as
+(freehand, line, polyline, rectangle, circle), each stroke in the LED
+colour picked above the drawing (a palette with the `scara led` colours,
+or "+" for any colour; "Colora" recolours a stroke you tap), and saves the drawing as
 G-code in the same format as `svg2gcode.py`. Every stroke is checked
 live with the same kinematics as `scara gcode -n` (a port of
 `kinematics.c` and `line.c`), so a red stroke is one the board would
@@ -57,10 +59,13 @@ drawing toward +X), use `--rotate -90`.
 The output uses only what `scara gcode` accepts: `G21 G90`, `G28`, then for
 each stroke `G0` to its start, `M3`, `G1` pieces (F on the first), `M5`,
 and `M2` at the end. Strokes are ordered nearest-first (and reversed when
-that is shorter) to cut the travel. The tip LED (P8_12) lights only on
-the `G1` lines between `M3` and `M5`, so the `G0` travel between strokes
-leaves no trace in a long-exposure photo. `tools/disegna.html` writes the
-same shape (its "M3/M5 attorno a ogni tratto" box, on by default).
+that is shorter) to cut the travel. The tip LED lights only on the `G1`
+lines between `M3` and `M5`, so the `G0` travel between strokes leaves no
+trace in a long-exposure photo. `tools/disegna.html` writes the same
+shape (its "M3/M5 ... M150" box, on by default), plus an
+`M150 R.. U.. B..` before `M3` whenever the next stroke's colour differs
+from the last one; "Apri .gcode" reads those colours back. Red is on/off
+only on the board (P8_12 has no PWM), so any red above 0 lights it fully.
 
 With a pen there is no lift (no Z): the G0 moves between strokes draw too.
 The LED is the intended tool.

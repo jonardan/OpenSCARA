@@ -47,7 +47,7 @@ file instead of `/etc/tmc2209.conf`. `scara help` prints the list.
 | `scara line X Y [F]` | Moves the tip to X/Y in a **straight line** at F mm/s (default `line_speed`). The elbow stays on its side, and every point is checked before moving. |
 | `scara gcode [-n] FILE` | Runs a G-code file (below). `-n` only checks it. |
 | `scara gcode [-n] -` | Streams G-code from stdin, answering `ok` or `error` per line. |
-| `scara led [on\|off]` | Switches the tip LED (P8_12) by hand; alone it prints `led: on` or `off`. |
+| `scara led [COLOR]` | Sets the tip RGB LED by hand: `off`, `on` (white), `red`, `green`, `blue`, `yellow`, `cyan`, `magenta`, `orange`, `purple`, `#rrggbb` or `R G B` (0-255). Alone it prints `led: R G B` or `led: off`. Red (P8_12) is on/off only. |
 
 RPM is the speed of the motor that moves furthest (default `rpm`). If a
 line would turn a motor faster than its `rpm`, the whole line runs slower
@@ -94,6 +94,7 @@ nothing moves. Then it runs, printing each line.
 | `G90` / `G91` | absolute / relative coordinates |
 | `G21` | millimetres |
 | `M3` / `M5` (`M106` / `M107`) | tool on / off: the tip LED lights only while a `G1` draws after `M3`; it is off during `G0`, `G28` and after `M5`, and off when the file ends, fails or is stopped |
+| `M150 R U B [P]` | tip LED colour, Marlin style: R red, U green, B blue, 0-255 each, a missing one is 0; P (0-255) scales all three. It stays until the next `M150` (white before the first) and recolours a line being drawn at once |
 | `M2` / `M30` | end of program |
 | `Z` | accepted and ignored with a warning (the arm has no Z) |
 
@@ -196,6 +197,8 @@ and `[motor2]` (elbow) override them for one motor.
 | `line_speed` | 20 | tip speed for `line` and G1 without F, mm/s |
 | `line_accel` | 400 | tip acceleration at the start and end of a line or path, mm/s² |
 | `corner_deg` | 15 | G1 lines turning by at most this many degrees run as one path; 0 stops at every line |
+| `led_red` / `led_green` / `led_blue` | tip-red / tip-green / tip-blue | the tip LED's channels in `/sys/class/leds` (P8_12, P8_13, P8_19 in the device tree) |
+| `led_common` | cathode | `anode` for a common anode RGB LED (its long leg on 3.3 V): the pins are inverted |
 | `home_dir` | 1 / 1 | 1 if a positive `turn` moves the joint toward its switch, -1 if away; 0 refuses to home |
 | `home_angle` | 116.75 / 171 | joint angle when the switch clicks, measured with `scara jog` |
 | `min_angle` / `max_angle` | -109.25..111.75 / -171..166 | safe joint range for `joint`, `goto`, `line`, G-code |

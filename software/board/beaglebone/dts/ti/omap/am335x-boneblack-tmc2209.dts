@@ -16,8 +16,10 @@
  *   Endstops (switch to GND, internal pull-up: 1 = open, 0 = pressed)
  *     P9_14  GPIO1_18   motor 1
  *     P9_22  GPIO0_2    motor 2
- *   Tip LED (gpio-leds "tip", /sys/class/leds/tip; pulled down, off at boot)
- *     P8_12  GPIO1_12
+ *   Tip RGB LED (/sys/class/leds/tip-*; pulled down, off at boot)
+ *     P8_12  GPIO1_12   red   (gpio-leds, on/off: P8_12 has no PWM)
+ *     P8_13  EHRPWM2B   green (pwm-leds, brightness 0-255)
+ *     P8_19  EHRPWM2A   blue  (pwm-leds, brightness 0-255)
  *
  * STEP 2 was on P9_28 but that pin stays at ~3.3 V even when driven low
  * (measured 2026-10-09, shield removed), so it moved to P9_12. HDMI audio
@@ -28,15 +30,34 @@
 / {
 	model = "TI AM335x BeagleBone Black + 2x TMC2209";
 
-	/* Held by the kernel so it stays on after "scara led on" exits */
+	/* Held by the kernel so they stay on after "scara led" exits */
 	leds-tip {
 		compatible = "gpio-leds";
 		pinctrl-names = "default";
 		pinctrl-0 = <&tip_led_pins>;
 
-		led-tip {
-			label = "tip";
+		led-tip-red {
+			label = "tip-red";
 			gpios = <&gpio1 12 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+	};
+
+	/* 10 kHz: no visible dotting in a long-exposure photo of a move */
+	leds-tip-pwm {
+		compatible = "pwm-leds";
+
+		led-tip-green {
+			label = "tip-green";
+			pwms = <&ehrpwm2 1 100000 0>;	/* B: P8_13 */
+			max-brightness = <255>;
+			default-state = "off";
+		};
+
+		led-tip-blue {
+			label = "tip-blue";
+			pwms = <&ehrpwm2 0 100000 0>;	/* A: P8_19 */
+			max-brightness = <255>;
 			default-state = "off";
 		};
 	};
@@ -65,7 +86,14 @@
 	/* Pulled down so the LED stays off until the driver takes the line */
 	tip_led_pins: tip-led-pins {
 		pinctrl-single,pins = <
-			AM33XX_PADCONF(AM335X_PIN_GPMC_AD12, PIN_OUTPUT_PULLDOWN, MUX_MODE7)	/* P8_12 tip LED */
+			AM33XX_PADCONF(AM335X_PIN_GPMC_AD12, PIN_OUTPUT_PULLDOWN, MUX_MODE7)	/* P8_12 tip LED red */
+		>;
+	};
+
+	tip_pwm_pins: tip-pwm-pins {
+		pinctrl-single,pins = <
+			AM33XX_PADCONF(AM335X_PIN_GPMC_AD9, PIN_OUTPUT_PULLDOWN, MUX_MODE4)	/* P8_13 ehrpwm2B green */
+			AM33XX_PADCONF(AM335X_PIN_GPMC_AD8, PIN_OUTPUT_PULLDOWN, MUX_MODE4)	/* P8_19 ehrpwm2A blue */
 		>;
 	};
 
@@ -81,6 +109,17 @@
 &uart1 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&tmc2209_uart1_pins>;
+	status = "okay";
+};
+
+/* PWM for the green and blue tip LED */
+&epwmss2 {
+	status = "okay";
+};
+
+&ehrpwm2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&tip_pwm_pins>;
 	status = "okay";
 };
 

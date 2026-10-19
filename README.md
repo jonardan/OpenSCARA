@@ -14,7 +14,7 @@ G-code (or any SVG drawing) into smooth, straight-line moves of the tip.
 - 🎨 **SVG to robot in three commands**: draw in Inkscape, convert, copy, run.
 - 🏠 **Homes itself** on two endstops keeps every move inside safe joint limits, and checks a whole G-code file before anything moves.
 - 🐧 **One SD-card image**: a small Buildroot Linux for the BeagleBone Black, ready to boot.
-- 💡 **First use: light painting**. An LED on the tip draws in the air for long-exposure photos.
+- 💡 **First use: light painting**. An RGB LED on the tip draws in the air for long-exposure photos, each stroke in its own colour (`M150`).
 
 ## ℹ️ Overview
 
@@ -52,7 +52,8 @@ scara gcode /usr/share/scara/spiral.gcode    # draw a spiral
 ```
 
 Draw by hand inside the arm's reach: open `tools/disegna.html` in a
-browser, draw, and save the G-code (details in the drawing guide).
+browser, draw with a colour per stroke, and save the G-code (details in
+the drawing guide).
 
 Draw your own picture from an SVG, on the PC:
 

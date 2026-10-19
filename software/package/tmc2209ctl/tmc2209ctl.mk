@@ -20,6 +20,8 @@ define TMC2209CTL_INSTALL_TARGET_CMDS
 		$(TARGET_DIR)/usr/share/scara/square.gcode
 	$(INSTALL) -D -m 0644 $(@D)/spiral.gcode \
 		$(TARGET_DIR)/usr/share/scara/spiral.gcode
+	$(INSTALL) -D -m 0644 $(@D)/rgb.gcode \
+		$(TARGET_DIR)/usr/share/scara/rgb.gcode
 	$(INSTALL) -D -m 0644 $(TMC2209CTL_PKGDIR)/tmc2209.conf \
 		$(TARGET_DIR)/etc/tmc2209.conf
 endef

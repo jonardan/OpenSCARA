@@ -86,6 +86,16 @@ static void lines(void)
 	CHECK(parse("M106") == 0 && l.tool == GC_TOOL_ON, "M106");
 	CHECK(parse("M5") == 0 && l.tool == GC_TOOL_OFF, "M5");
 	CHECK(parse("M107") == 0 && l.tool == GC_TOOL_OFF, "M107");
+	CHECK(parse("M150 R255 U128 B0") == 0 && l.color && l.rgb[0] == 255 &&
+	      l.rgb[1] == 128 && l.rgb[2] == 0 && !l.tool, "M150 R U B");
+	CHECK(parse("M150 B200") == 0 && l.color && l.rgb[0] == 0 &&
+	      l.rgb[1] == 0 && l.rgb[2] == 200, "M150: missing ones are 0");
+	CHECK(parse("M150") == 0 && l.color && !l.rgb[0] && !l.rgb[1] &&
+	      !l.rgb[2], "M150 alone: black");
+	CHECK(parse("M150 R255 U255 B100 P51") == 0 && l.rgb[0] == 51 &&
+	      l.rgb[1] == 51 && l.rgb[2] == 20, "M150 P scales: %d %d %d",
+	      l.rgb[0], l.rgb[1], l.rgb[2]);
+	CHECK(parse("M3") == 0 && !l.color, "M3: no color");
 	CHECK(parse("M2") == 0 && l.end, "M2");
 	CHECK(parse("M30") == 0 && l.end, "M30");
 
@@ -97,6 +107,11 @@ static void lines(void)
 	check_error("G2 X1 Y1 I5 J0", "unknown code G2");
 	check_error("G1.5 X1", "unknown code G1.5");
 	check_error("M4", "unknown code M4");
+	check_error("M150 R256", "R must be 0-255");
+	check_error("M150 U-1", "U must be 0-255");
+	check_error("M150 R1 R2", "R twice");
+	check_error("G1 X1 R5", "only go with M150");
+	check_error("M3 B5", "only go with M150");
 	check_error("T1", "unknown word T");
 	check_error("G1 X1 E5", "unknown word E");
 	check_error("G1 X", "X without a number");
@@ -143,10 +158,32 @@ static void sample(void)
 	      on, off, rel, end);
 }
 
+/* The RGB sample: every line parses, four colours */
+static void rgb_sample(void)
+{
+	FILE *f = fopen("rgb.gcode", "r");
+	char buf[256];
+	int n = 0, colors = 0;
+
+	CHECK(f, "rgb.gcode missing");
+	if (!f)
+		return;
+	gc_init(&st);
+	while (fgets(buf, sizeof(buf), f)) {
+		n++;
+		buf[strcspn(buf, "\r\n")] = 0;
+		CHECK(parse(buf) == 0, "rgb.gcode:%d: %s", n, msg);
+		colors += l.color;
+	}
+	fclose(f);
+	CHECK(colors == 4, "colors %d", colors);
+}
+
 int main(void)
 {
 	lines();
 	sample();
+	rgb_sample();
 	printf("test_gcode: %d checks, %d failed\n", checks, failures);
 	return failures ? 1 : 0;
 }

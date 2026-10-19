@@ -62,12 +62,15 @@ static void usage(void)
 "  gcode [-n] FILE       run a G-code file: G0 X Y (goto), G1 X Y F\n"
 "                        (line, F in mm/min), G28 (home), G90 / G91, G21;\n"
 "                        M3/M5 (tool on/off: the tip LED lights only\n"
-"                        while G1 draws with the tool on); Z ignored.\n"
+"                        while G1 draws with the tool on), M150 R U B\n"
+"                        (its color, 0-255, white by default); Z ignored.\n"
 "                        Every line is checked before anything moves;\n"
 "                        -n only checks.\n"
 "                        FILE - streams stdin: each line is checked, run\n"
 "                        and answered ok (or error, and it stops)\n"
-"  led [on|off]          switch the tip LED, or print its state\n"
+"  led [COLOR]           set the tip RGB LED, or print its color: off,\n"
+"                        on (white), red, green, blue, yellow, cyan,\n"
+"                        magenta, orange, purple, #rrggbb or R G B (0-255)\n"
 "\n"
 "  Angles: shoulder from the +X axis, elbow from the line of link 1\n"
 "  (0 = straight), counter-clockwise positive seen from above.  X/Y in\n"
@@ -492,64 +495,181 @@ static int cmd_home(int argc, char **argv)
 }
 
 /*
- * The tip LED is a gpio-leds device from the device tree, not a GPIO line
- * requested here: a requested line goes back to an input when the program
- * exits, which would switch the LED off.  The kernel holds it instead.
+ * The tip RGB LED is three kernel LEDs from the device tree (gpio-leds red,
+ * pwm-leds green and blue), not GPIO lines requested here: a requested
+ * line goes back to an input when the program exits, which would switch
+ * the LED off.  The kernel holds them instead.  Colors are 0-255 per
+ * channel; a channel with max_brightness 1 (red, plain GPIO) is on for
+ * anything above 0.  With led_common = anode the pins are inverted.
  */
-static const char *led_path(void)
-{
-	static char path[96];
+static const char *const led_color_names[3] = { "red", "green", "blue" };
 
-	snprintf(path, sizeof(path), "/sys/class/leds/%s/brightness",
-		 motors[0].led);
+static const char *led_name(int i)
+{
+	return i == 0 ? motors[0].led_red : i == 1 ? motors[0].led_green :
+	       motors[0].led_blue;
+}
+
+static const char *led_path(int i, const char *file)
+{
+	static char path[128];
+
+	snprintf(path, sizeof(path), "/sys/class/leds/%s/%s", led_name(i),
+		 file);
 	return path;
 }
 
-/* Last state written to the LED: -1 not known yet */
-static int led_state = -1;
+static void led_error(int i)
+{
+	err("%s: %s (is led_%s = %s right in %s?)", led_path(i, "brightness"),
+	    strerror(errno), led_color_names[i], led_name(i), CONF_PATH);
+}
 
-/* Switch the LED; a failure is reported once and doesn't stop a drawing */
-static int led_set(int on)
+/* A number from a sysfs file, or -1 */
+static int led_read(int i, const char *file)
+{
+	char buf[16];
+	FILE *f = fopen(led_path(i, file), "r");
+	int ok = f && fgets(buf, sizeof(buf), f);
+
+	if (f)
+		fclose(f);
+	return ok ? atoi(buf) : -1;
+}
+
+/* max_brightness of channel i (1 for GPIO, 255 for PWM), or -1 */
+static int led_max(int i)
+{
+	static int max[3];
+
+	if (max[i] <= 0)
+		max[i] = led_read(i, "max_brightness");
+	return max[i];
+}
+
+static const int led_black[3];
+static const int led_white[3] = { 255, 255, 255 };
+
+/* Last color written: -1 not known yet; led_lit: it is not black */
+static int led_shown[3] = { -1, -1, -1 };
+static int led_lit;
+
+/* Show a color; a failure is reported once and doesn't stop a drawing */
+static int led_show(const int rgb[3])
 {
 	static int said;
+	int i, max, raw, ret = 0;
 	FILE *f;
 
-	if (on == led_state)
-		return 0;
-	f = fopen(led_path(), "w");
-	if (!f || fputs(on ? "1" : "0", f) < 0 || fclose(f)) {
-		if (!said++)
-			err("%s: %s (is led = %s right in %s?)", led_path(),
-			    strerror(errno), motors[0].led, CONF_PATH);
-		led_state = -1;
-		return -1;
+	for (i = 0; i < 3; i++) {
+		if (rgb[i] == led_shown[i])
+			continue;
+		max = led_max(i);
+		/* Rounded up, so a dim value still lights a GPIO channel */
+		raw = max > 0 ? (rgb[i] * max + 254) / 255 : 0;
+		if (motors[0].led_anode)
+			raw = max - raw;
+		f = max > 0 ? fopen(led_path(i, "brightness"), "w") : NULL;
+		if (!f || fprintf(f, "%d", raw) < 0 || fclose(f)) {
+			if (!said++)
+				led_error(i);
+			led_shown[i] = -1;
+			ret = -1;
+			continue;
+		}
+		led_shown[i] = rgb[i];
 	}
-	led_state = on;
+	led_lit = rgb[0] || rgb[1] || rgb[2];
+	return ret;
+}
+
+static int led_off(void)
+{
+	return led_show(led_black);
+}
+
+/* Colors for "scara led NAME" */
+static const struct {
+	const char *name;
+	int rgb[3];
+} led_colors[] = {
+	{ "white", { 255, 255, 255 } }, { "red", { 255, 0, 0 } },
+	{ "green", { 0, 255, 0 } }, { "blue", { 0, 0, 255 } },
+	{ "yellow", { 255, 255, 0 } }, { "cyan", { 0, 255, 255 } },
+	{ "magenta", { 255, 0, 255 } }, { "orange", { 255, 64, 0 } },
+	{ "purple", { 255, 0, 160 } }, { "on", { 255, 255, 255 } },
+	{ "off", { 0, 0, 0 } },
+};
+
+/* "0".."255" into *v */
+static int led_byte(const char *s, int *v)
+{
+	char *end;
+	long n = strtol(s, &end, 10);
+
+	if (!*s || *end || n < 0 || n > 255)
+		return -1;
+	*v = n;
 	return 0;
+}
+
+/* A color: a name, #rrggbb, or R G B (argc 1 or 3) */
+static int led_parse(int argc, char **argv, int rgb[3])
+{
+	unsigned int hex;
+	char *end;
+	size_t i;
+
+	if (argc == 3)
+		return led_byte(argv[0], &rgb[0]) ||
+		       led_byte(argv[1], &rgb[1]) ||
+		       led_byte(argv[2], &rgb[2]) ? -1 : 0;
+	if (argc != 1)
+		return -1;
+	if (argv[0][0] == '#' && strlen(argv[0]) == 7) {
+		hex = strtoul(argv[0] + 1, &end, 16);
+		if (*end)
+			return -1;
+		rgb[0] = hex >> 16;
+		rgb[1] = hex >> 8 & 255;
+		rgb[2] = hex & 255;
+		return 0;
+	}
+	for (i = 0; i < sizeof(led_colors) / sizeof(led_colors[0]); i++)
+		if (!strcmp(argv[0], led_colors[i].name)) {
+			memcpy(rgb, led_colors[i].rgb, sizeof(led_colors[i].rgb));
+			return 0;
+		}
+	return -1;
 }
 
 static int cmd_led(int argc, char **argv)
 {
-	char buf[16];
-	FILE *f;
+	int rgb[3], raw, max, i;
 
-	if (argc > 2 || (argc == 2 && strcmp(argv[1], "on") &&
-			 strcmp(argv[1], "off"))) {
-		err("usage: led [on|off]");
-		return -1;
+	if (argc > 1) {
+		if (led_parse(argc - 1, argv + 1, rgb)) {
+			err("usage: led [off|on|white|red|green|blue|yellow|"
+			    "cyan|magenta|orange|purple|#rrggbb|R G B]");
+			return -1;
+		}
+		return led_show(rgb);
 	}
-	if (argc == 2)
-		return led_set(!strcmp(argv[1], "on"));
-	f = fopen(led_path(), "r");
-	if (!f || !fgets(buf, sizeof(buf), f)) {
-		err("%s: %s (is led = %s right in %s?)", led_path(),
-		    strerror(errno), motors[0].led, CONF_PATH);
-		if (f)
-			fclose(f);
-		return -1;
+	for (i = 0; i < 3; i++) {
+		max = led_max(i);
+		raw = max > 0 ? led_read(i, "brightness") : -1;
+		if (raw < 0) {
+			led_error(i);
+			return -1;
+		}
+		if (motors[0].led_anode)
+			raw = max - raw;
+		rgb[i] = (raw * 255 + max / 2) / max;
 	}
-	fclose(f);
-	printf("led: %s\n", atoi(buf) ? "on" : "off");
+	if (rgb[0] || rgb[1] || rgb[2])
+		printf("led: %d %d %d\n", rgb[0], rgb[1], rgb[2]);
+	else
+		printf("led: off\n");
 	return 0;
 }
 
@@ -664,6 +784,7 @@ struct run {
 	double th[NJOINTS], x, y, speed;
 	int rel, is_homed, said_z;
 	int tool;		/* M3: G1 moves light the LED, until M5 */
+	int rgb[3];		/* M150: the color they light it with */
 };
 
 static void run_init(struct run *r, const struct arm *a, const char *name,
@@ -674,6 +795,7 @@ static void run_init(struct run *r, const struct arm *a, const char *name,
 	r->name = name;
 	r->dry = dry;
 	r->speed = motors[0].line_speed;
+	memcpy(r->rgb, led_white, sizeof(r->rgb));
 	r->is_homed = get_angles(r->th) == 0;
 	if (r->is_homed)
 		kin_forward(a, r->th, &r->x, &r->y);
@@ -684,7 +806,8 @@ static void run_init(struct run *r, const struct arm *a, const char *name,
  * from where the previous one left the joints, so an unreachable point is
  * found before anything moves.  G0 is 'goto', G1 is 'line', G28 is 'home'.
  * The LED is on only during a G1 move after M3: off for G0, G28 and M5
- * (M3 itself waits for the next G1).  Z is reported once, on the dry run.
+ * (M3 itself waits for the next G1), in the color of the last M150 (white
+ * before any); an M150 while it is lit recolors it at once.  Z is reported once, on the dry run.
  * Returns 1 after M2/M30.
  */
 static int run_line(struct run *r, const struct gc_line *l, const char *text,
@@ -700,7 +823,7 @@ static int run_line(struct run *r, const struct gc_line *l, const char *text,
 		return -1;
 	}
 	if (!r->dry && !stream && (l->dist || l->home || l->move ||
-				   l->has_f || l->end))
+				   l->has_f || l->color || l->end))
 		printf("%d: %s\n", n, text);
 	if (r->dry && l->has_z && !r->said_z++)
 		printf("%s:%d: Z ignored, the arm has no Z axis\n", r->name, n);
@@ -708,7 +831,7 @@ static int run_line(struct run *r, const struct gc_line *l, const char *text,
 		r->rel = l->dist == GC_REL;
 	if (l->home) {
 		if (!r->dry)
-			led_set(0);
+			led_off();
 		if (r->dry) {
 			for (j = 0; j < NJOINTS; j++)
 				r->th[j] = motors[j].home_angle;
@@ -722,6 +845,11 @@ static int run_line(struct run *r, const struct gc_line *l, const char *text,
 	}
 	if (l->has_f)
 		r->speed = l->f / 60;	/* mm/min to mm/s */
+	if (l->color) {
+		memcpy(r->rgb, l->rgb, sizeof(r->rgb));
+		if (!r->dry && led_lit)
+			led_show(r->rgb);
+	}
 	if (l->move) {
 		tx = l->has_x ? l->x + (r->rel ? r->x : 0) : r->x;
 		ty = l->has_y ? l->y + (r->rel ? r->y : 0) : r->y;
@@ -740,7 +868,7 @@ static int run_line(struct run *r, const struct gc_line *l, const char *text,
 				return -1;
 			}
 		} else {
-			led_set(l->motion && r->tool);
+			led_show(l->motion && r->tool ? r->rgb : led_black);
 			if (l->motion ? line_to(r->a, tx, ty, r->speed) :
 			    goto_xy(r->a, tx, ty, ELBOW_ANY, motors[0].rpm)) {
 				err("%s:%d: %s", r->name, n, text);
@@ -755,7 +883,7 @@ static int run_line(struct run *r, const struct gc_line *l, const char *text,
 	if (l->tool)
 		r->tool = l->tool == GC_TOOL_ON;
 	if (!r->dry && (!r->tool || l->end))
-		led_set(0);
+		led_off();
 	return l->end ? 1 : 0;
 }
 
@@ -781,9 +909,11 @@ static int chain(const struct prog *p, int i, struct run *r,
 		int rel = l->dist ? l->dist == GC_REL : c.rel;
 		double tx, ty, dx, dy, len;
 
-		if (k > i && (l->home || l->tool || l->end || sp != c.speed ||
-			      (l->move && !l->motion)))
+		if (k > i && (l->home || l->tool || l->color || l->end ||
+			      sp != c.speed || (l->move && !l->motion)))
 			break;
+		if (l->color)	/* only on line i: M150 on the G1 line */
+			memcpy(c.rgb, l->rgb, sizeof(c.rgb));
 		if (l->move) {
 			tx = l->has_x ? l->x + (rel ? c.x : 0) : c.x;
 			ty = l->has_y ? l->y + (rel ? c.y : 0) : c.y;
@@ -837,7 +967,7 @@ static int prog_run(const struct prog *p, const struct arm *a, int dry)
 			if (n > 1) {
 				for (k = i; k <= last; k++)
 					printf("%d: %s\n", k + 1, p->text[k]);
-				led_set(c.tool);
+				led_show(c.tool ? c.rgb : led_black);
 				if (path_to(a, n, (const double (*)[2])xy,
 					    c.speed) || get_angles(c.th)) {
 					err("%s:%d-%d: G1 path failed", p->name,
@@ -939,7 +1069,7 @@ static int cmd_gcode(int argc, char **argv)
 		ret = stream_run(&a, dry);
 		stream = quiet = 0;
 		if (!dry)
-			led_set(0);
+			led_off();
 		return ret ? ret : dry ? 0 : cmd_where();
 	}
 	if (prog_load(argv[1 + dry], &p))
@@ -953,7 +1083,7 @@ static int cmd_gcode(int argc, char **argv)
 	}
 	quiet = 1;
 	ret = prog_run(&p, &a, 0);
-	led_set(0);	/* off however the file ended */
+	led_off();	/* off however the file ended */
 	quiet = 0;
 	if (!ret)
 		ret = cmd_where();

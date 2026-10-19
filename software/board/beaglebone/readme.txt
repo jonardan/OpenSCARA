@@ -360,6 +360,7 @@ G-code: scara gcode
 
   scara gcode -n /usr/share/scara/square.gcode
   scara gcode /usr/share/scara/square.gcode
+  scara gcode /usr/share/scara/rgb.gcode   # each side a colour
 
   A spiral around X200 Y0, 5 to 80 mm radius in 5 turns, as 360 G1
   segments (about a minute at 20 mm/s). In a file,
@@ -387,32 +388,49 @@ G-code: scara gcode
   (tools/bbb_send.py).
 Tip LED: scara led
 ------------------
-  The LED is on P8_12 (GPIO1_12), through a resistor to GND:
+  An RGB LED (4 legs), one resistor per colour. Common cathode (the long
+  leg to GND, the default):
 
-  P8_12 o──[ 330 Ohm ]──|>|──o P8_2 GND     (LED anode toward P8_12)
+  P8_12 o──[ 330 Ohm ]──|>|── red   ─┐
+  P8_13 o──[ 150 Ohm ]──|>|── green ─┼──o P8_2 GND   (long leg)
+  P8_19 o──[ 150 Ohm ]──|>|── blue  ─┘
 
-  330 Ohm gives about 4 mA with a red/green/yellow LED, the most a BBB
-  pin should give. A white or blue LED needs about 3 V, so use 100 Ohm
-  (still under 4 mA). For a brighter LED, drive it through an NPN
-  transistor (e.g. 2N2222: P8_12 --[1 kOhm]-- base, emitter to GND, LED
-  and its resistor from 5 V (P9_7) to the collector).
+  Common anode (the long leg to 3.3 V): the same resistors from each pin
+  to its leg, the long leg to P9_3 (3.3 V), and in /etc/tmc2209.conf
 
-  The device tree makes it the kernel LED "tip" (/sys/class/leds/tip),
-  pulled down so it is off at boot. The kernel holds the pin, so the LED
-  stays on after the command exits.
+  led_common = anode
 
-  scara led on
+  The resistors keep each pin at about 4 mA, the most a BBB pin should
+  give: red drops about 2 V, green and blue about 2.7-3 V. A single red
+  LED still works on P8_12 alone (330 Ohm to P8_2). For a brighter LED,
+  drive each colour through an NPN transistor (e.g. 2N2222: pin --[1
+  kOhm]-- base, emitter to GND, LED leg and its resistor from 5 V (P9_7)
+  to the collector; common anode LED, led_common stays cathode).
+
+  P8_12 has no PWM, so red is only on or off (any value above 0 is full
+  red). P8_13 and P8_19 are EHRPWM2B / 2A at 10 kHz, so green and blue
+  have 256 levels. The device tree makes them the kernel LEDs tip-red,
+  tip-green and tip-blue (/sys/class/leds/), all off at boot. The kernel
+  holds the pins, so the LED stays on after the command exits.
+
+  scara led red                   # or green blue yellow cyan magenta
+                                  # orange purple white (= on)
+  scara led 0 255 128             # R G B, 0-255
+  scara led '#00ff80'             # the same, as in the drawing page
   scara led off
-  scara led                       # prints led: on / off
+  scara led                       # prints led: R G B, or off
 
   In G-code the LED follows M3 / M5, but only on the drawn lines: after
   M3 it lights at the start of each G1 and goes off for any G0 (travel)
-  or G28; M5 switches it off. When the file ends, fails or is stopped
+  or G28; M5 switches it off. M150 R.. U.. B.. (0-255, as in Marlin; U is
+  green, a missing one is 0) sets the colour of the next G1 lines, or of
+  the one being drawn; it is white until the first M150. When the file ends, fails or is stopped
   with Ctrl-C (or the console closes), scara switches it off. The square
   has M3 / M5 around its four sides, so the LED is off while it goes to
   the first corner and on along the edges:
 
   scara gcode /usr/share/scara/square.gcode
+  scara gcode /usr/share/scara/rgb.gcode   # each side a colour
 
 Configuration: /etc/tmc2209.conf
 --------------------------------

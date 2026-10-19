@@ -7,6 +7,9 @@
 
 case "$1" in
 	start)
+		# Tip LED off: with led_common = anode the pins are low (on)
+		# until scara writes them
+		scara led off >/dev/null 2>&1
 		printf "Configuring TMC2209 drivers: "
 		if tmc2209ctl -m all init >/dev/null 2>&1; then
 			echo "OK"
