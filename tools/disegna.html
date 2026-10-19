@@ -269,7 +269,7 @@ input[type="file"] { display: none; }
           <label for="max2">Gomito max °<input type="number" id="max2" step="0.25"></label>
           <label for="h1">Home spalla °<input type="number" id="h1" step="0.25"></label>
           <label for="h2">Home gomito °<input type="number" id="h2" step="0.25"></label>
-          <label for="miny">Y minima (tavolo) mm<input type="number" id="miny" step="1"></label>
+          <label for="maxy">Y massima (tavolo) mm<input type="number" id="maxy" step="1"></label>
         </div>
         <div class="row" style="margin-top:8px"><button id="resetp">Ripristina valori</button></div>
       </details>
@@ -282,7 +282,7 @@ input[type="file"] { display: none; }
 "use strict";
 
 /* ---------- arm model: a port of kinematics.c and line.c ---------- */
-const DEFAULTS = { l1: 195.4, l2: 166.4, min: [-109.25, -171], max: [111.75, 166], home: [116.75, 171], minY: 0 };
+const DEFAULTS = { l1: 195.4, l2: 166.4, min: [-109.25, -171], max: [111.75, 166], home: [116.75, 171], maxY: 0 };
 let P = JSON.parse(JSON.stringify(DEFAULTS));
 const DEG = Math.PI / 180, COS_EPS = 1e-9, LIM_EPS = 1e-6;
 const LINE_SEG_MM = 1, LINE_JUMP_DEG = 10, MIN_MOVE_MM = 0.01;
@@ -312,7 +312,7 @@ function solve(x, y, c2, sign) {
 function cosElbow(x, y) { return (x * x + y * y - P.l1 * P.l1 - P.l2 * P.l2) / (2 * P.l1 * P.l2); }
 /* elbow: 0 any, 1 positive, -1 negative. Returns {r, th} */
 function ik(x, y, elbow, near) {
-  if (y < P.minY - 1e-6) return { r: "below" };
+  if (y > P.maxY + 1e-6) return { r: "table" };
   let c2 = cosElbow(x, y);
   if (c2 > 1 + COS_EPS) return { r: "far" };
   if (c2 < -1 - COS_EPS) return { r: "close" };
@@ -348,27 +348,34 @@ const WHY = {
   close: "troppo vicino alla spalla",
   limits: "fuori dai limiti dei giunti",
   jump: "la linea passa troppo vicino alla spalla",
-  below: "sotto l'asse X: la punta toccherebbe il tavolo",
+  table: "oltre l'asse X, verso il tavolo",
 };
-/* kin_joint_move(): a joint move swings the tip along a curve; the first point of it below the table, or null */
-function jointBelow(a, b) {
+/* kin_joint_move(): a joint move swings the tip along a curve; its first point past the table edge, or null.
+   Within TABLE_FREE_R of the shoulder (the folded tip, as at home) it may cross. */
+const TABLE_FREE_R = 60;
+function jointCross(a, b) {
   const n = Math.max(1, Math.ceil(Math.max(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1]))));
   for (let i = 0; i <= n; i++) {
     const p = fk([a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n]);
-    if (p[1] < P.minY - 1e-6) return p;
+    if (p[1] > P.maxY + 1e-6 && Math.hypot(p[0], p[1]) > TABLE_FREE_R) return p;
   }
   return null;
 }
-/* plan_g0() in scara.c: joint move, else the other elbow side, else a straight line */
+/* plan_g0() in scara.c: one joint move (nearest elbow side, then the other), else shoulder first then
+   elbow, else elbow first then shoulder, else a straight line. moves: the joint targets in order */
 function planG0(th, x, y) {
   const k = ik(x, y, 0, th);
   if (k.r !== "ok") return { r: k.r, bad: [x, y] };
-  if (!jointBelow(th, k.th)) return { r: "ok", th: k.th };
-  const alt = ik(x, y, k.th[1] < 0 ? 1 : -1, null);
-  if (alt.r === "ok" && !jointBelow(th, alt.th)) return { r: "ok", th: alt.th };
+  const sols = [k.th], alt = ik(x, y, k.th[1] < 0 ? 1 : -1, null);
+  if (alt.r === "ok") sols.push(alt.th);
+  for (const s of sols) if (!jointCross(th, s)) return { r: "ok", th: s, moves: [s] };
+  for (const k2 of [0, 1]) for (const s of sols) {
+    const v = k2 ? [th[0], s[1]] : [s[0], th[1]];
+    if (!jointCross(th, v) && !jointCross(v, s)) return { r: "ok", th: s, moves: [v, s] };
+  }
   const lp = linePlan(th, x, y);
   if (lp.r === "ok") return { r: "ok", th: lp.pts[lp.pts.length - 1], line: lp.pts };
-  return { r: "below", bad: jointBelow(th, k.th) };
+  return { r: "table", bad: jointCross(th, k.th) };
 }
 
 /* ---------- drawing state ---------- */
@@ -377,10 +384,10 @@ const SAMPLE = (() => {
   const star = [];
   for (let k = 0; k <= 10; k++) {
     const a = (90 + k * 36) * DEG, r = k % 2 ? 26 : 62;
-    star.push([200 + r * Math.cos(a), 90 + r * Math.sin(a)]);
+    star.push([200 + r * Math.cos(a), -90 - r * Math.sin(a)]);
   }
   s.push({ kind: "poly", pts: star, color: "#ffff00" });
-  s.push({ kind: "circle", pts: circlePts(200, 90, 75), color: "#00ffff" });
+  s.push({ kind: "circle", pts: circlePts(200, -90, 75), color: "#00ffff" });
   return s;
 })();
 /* LED colours: the same names as "scara led NAME" */
@@ -394,7 +401,7 @@ let strokes = [];
 let undoStack = [], redoStack = [];
 let isSample = false;
 let tool = "free", snap = false, rot = 0;
-let view = { s: 1, cu: 120, cv: 90 };
+let view = { s: 1, cu: 120, cv: 90 };   /* display coords: v = -y */
 let draft = null;
 let hover = null;
 let sim = null;
@@ -421,6 +428,7 @@ function restore() {
     if (!d) return false;
     strokes = (d.strokes || []).map(s => s.color ? s : Object.assign(s, { color: DEFAULT_COLOR }));
     isSample = !!d.isSample;
+    if (isSample) strokes = JSON.parse(JSON.stringify(SAMPLE));
     if (/^#[0-9a-f]{6}$/i.test(d.color || "")) color = d.color.toLowerCase();
     if (d.P) P = Object.assign(JSON.parse(JSON.stringify(DEFAULTS)), d.P);
     if (d.feed) $("feed").value = d.feed;
@@ -435,14 +443,15 @@ function restore() {
 const $ = id => document.getElementById(id);
 const cv = $("cv"), ctx = cv.getContext("2d");
 let W = 0, H = 0, DPR = 1, fitted = false;
-function toDisp(x, y) { return rot ? [-y, x] : [x, y]; }
-function fromDisp(u, v) { return rot ? [v, -u] : [u, v]; }
+/* The screen shows the arm as it stands: the table (+Y) at the bottom, so robot -Y is up */
+function toDisp(x, y) { return rot ? [y, x] : [x, -y]; }
+function fromDisp(u, v) { return rot ? [v, u] : [u, -v]; }
 function w2s(x, y) { const [u, v] = toDisp(x, y); return [W / 2 + (u - view.cu) * view.s, H / 2 - (v - view.cv) * view.s]; }
 function s2w(sx, sy) { return fromDisp((sx - W / 2) / view.s + view.cu, -(sy - H / 2) / view.s + view.cv); }
 function fitView() {
   const R = P.l1 + P.l2;
   /* bounding box of the reach that matters: front half plus the shoulder's swing */
-  const box = [[-R * 0.75, Math.max(-R, P.minY - 40)], [R, R]];
+  const box = [[-R * 0.75, -R], [R, Math.min(R, P.maxY + 40)]];
   const corners = [[box[0][0], box[0][1]], [box[1][0], box[1][1]], [box[0][0], box[1][1]], [box[1][0], box[0][1]]].map(p => toDisp(p[0], p[1]));
   const us = corners.map(c => c[0]), vs = corners.map(c => c[1]);
   const du = Math.max(...us) - Math.min(...us), dv = Math.max(...vs) - Math.min(...vs);
@@ -481,7 +490,7 @@ function workspaceImage() {
   for (let py = 0; py < h; py++) {
     for (let px = 0; px < w; px++) {
       const [x, y] = s2w(px + 0.5, py + 0.5);
-      if (y < P.minY) continue;
+      if (y > P.maxY) continue;
       let c2 = cosElbow(x, y);
       if (c2 > 1 || c2 < -1) continue;
       const a = solve(x, y, c2, 1) !== null, b = solve(x, y, c2, -1) !== null;
@@ -513,7 +522,7 @@ function simulate() {
       travelLen += Math.hypot(pts[0][0] - at[0], pts[0][1] - at[1]);
       const k = planG0(th, pts[0][0], pts[0][1]);
       if (k.r !== "ok") {
-        errors.push({ i, at: k.bad, msg: k.r === "below" ? `lo spostamento G0 passa ${WHY.below}` : `inizio ${WHY[k.r]}` }); badStroke.add(i);
+        errors.push({ i, at: k.bad, msg: k.r === "table" && k.bad !== null && (k.bad[0] !== pts[0][0] || k.bad[1] !== pts[0][1]) ? `lo spostamento G0 passa ${WHY.table}` : `inizio ${WHY[k.r]}` }); badStroke.add(i);
         at = pts[pts.length - 1];
         const e = ik(at[0], at[1], 0, th); if (e.r === "ok") th = e.th;
         return;
@@ -522,10 +531,13 @@ function simulate() {
       if (k.line) {
         for (let q = 1; q < k.line.length; q++) { t += jdt(k.line[q - 1], k.line[q]); frames.push({ t, th: k.line[q], on: false }); }
       } else {
-        const dt = jdt(th, k.th);
-        const n = Math.max(1, Math.ceil(Math.max(Math.abs(k.th[0] - th[0]), Math.abs(k.th[1] - th[1]))));
-        for (let j = 1; j <= n; j++) frames.push({ t: t + dt * j / n, th: [th[0] + (k.th[0] - th[0]) * j / n, th[1] + (k.th[1] - th[1]) * j / n], on: false });
-        t += dt;
+        let a = th;
+        for (const b of k.moves) {
+          const dt = jdt(a, b);
+          const n = Math.max(1, Math.ceil(Math.max(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1]))));
+          for (let j = 1; j <= n; j++) frames.push({ t: t + dt * j / n, th: [a[0] + (b[0] - a[0]) * j / n, a[1] + (b[1] - a[1]) * j / n], on: false });
+          t += dt; a = b;
+        }
       }
       th = k.th; at = pts[0];
     }
@@ -704,13 +716,13 @@ function draw() {
     const label = `spalla ${a}°`, tw = ctx.measureText(label).width;
     ctx.fillText(label, p[0] < o[0] ? p[0] - tw - 4 : p[0] + 4, p[1] + (p[1] < o[1] ? -2 : 10));
   }
-  /* the table: the tip stays at y >= minY */
+  /* the table: the tip stays at y <= maxY */
   {
-    const a = w2s(-R - 20, P.minY), b = w2s(R + 20, P.minY);
+    const a = w2s(-R - 20, P.maxY), b = w2s(R + 20, P.maxY);
     ctx.save(); ctx.strokeStyle = C.bad; ctx.lineWidth = 1.5; ctx.setLineDash([8, 4]);
     ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); ctx.restore();
-    ctx.fillStyle = C.bad; const lp = w2s(-R * 0.7, P.minY);
-    ctx.fillText("tavolo", lp[0] + 4, lp[1] + (rot ? -4 : 13));
+    ctx.fillStyle = C.bad; const lp = w2s(-R * 0.7, P.maxY);
+    ctx.fillText("limite della punta (tavolo sotto)", lp[0] + 4, lp[1] + (rot ? -4 : 13));
     ctx.fillStyle = C.muted;
   }
   /* X axis and origin */
@@ -718,9 +730,9 @@ function draw() {
   const xa = w2s(R + 20, 0);
   ctx.beginPath(); ctx.moveTo(o[0], o[1]); ctx.lineTo(xa[0], xa[1]); ctx.stroke();
   ctx.fillText("+X", xa[0] + 4, xa[1] + 4);
-  const ya = w2s(0, 60);
+  const ya = w2s(0, -60);
   ctx.beginPath(); ctx.moveTo(o[0], o[1]); ctx.lineTo(ya[0], ya[1]); ctx.stroke();
-  ctx.fillText("+Y", ya[0] + 4, ya[1]);
+  ctx.fillText("−Y", ya[0] + 4, ya[1]);
 
   /* travel moves */
   if (sim && $("showtravel").checked) {
@@ -1000,7 +1012,7 @@ function setColor(hex) {
 $("custom").addEventListener("input", e => setColor(e.target.value));
 
 /* ---------- arm parameters ---------- */
-const PF = { l1: ["l1"], l2: ["l2"], min1: ["min", 0], max1: ["max", 0], min2: ["min", 1], max2: ["max", 1], h1: ["home", 0], h2: ["home", 1], miny: ["minY"] };
+const PF = { l1: ["l1"], l2: ["l2"], min1: ["min", 0], max1: ["max", 0], min2: ["min", 1], max2: ["max", 1], h1: ["home", 0], h2: ["home", 1], maxy: ["maxY"] };
 function showParams() { for (const [id, [k, i]] of Object.entries(PF)) $(id).value = i === undefined ? P[k] : P[k][i]; }
 for (const [id, [k, i]] of Object.entries(PF)) $(id).addEventListener("change", () => {
   const v = parseFloat($(id).value); if (!isFinite(v)) return;

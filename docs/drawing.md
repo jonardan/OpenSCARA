@@ -22,10 +22,10 @@ G-code in the same format as `svg2gcode.py`. Every stroke is checked
 live with the same kinematics as `scara gcode -n` (a port of
 `kinematics.c` and `line.c`), so a red stroke is one the board would
 refuse. "Simula" plays the arm through the drawing; "Apri .gcode" loads
-an existing file to look at it. The red dashed line is the table
-(`min_y_mm`, 0 = the X axis): nothing can be drawn below it, and a G0
-whose joint move would swing the tip below it runs as a straight line,
-as on the board.
+an existing file to look at it. The page shows the arm as it stands, the
+table at the bottom (robot +Y points down, towards it). The red dashed
+line is the table edge (`max_y_mm`, 0 = the X axis): nothing can be drawn
+past it, and G0 travel is planned as on the board (below).
 
 ### Draw straight from the page (USB cable)
 
@@ -57,20 +57,22 @@ under "Parametri del braccio" if you recalibrate.
 ## 2. Convert: `tools/svg2gcode.py`
 
     python3 tools/svg2gcode.py drawing.svg -o drawing.gcode
-    python3 tools/svg2gcode.py logo.svg -o logo.gcode --size 120 --center 210,100 --feed 900
+    python3 tools/svg2gcode.py logo.svg -o logo.gcode --size 120 --center 210,-100 --feed 900
 
 | option | default | meaning |
 |---|---|---|
 | `--size` | 150 | longer side of the drawing, mm |
-| `--center` | 200,90 | centre of the drawing, X,Y in mm from the shoulder axis |
+| `--center` | 200,-90 | centre of the drawing, X,Y in mm from the shoulder axis |
 | `--rotate` | 0 | turn the drawing counter-clockwise, degrees |
 | `--feed` | 1200 | drawing speed, mm/min (1200 = 20 mm/s, the `line_speed` default) |
 | `--step` | 1 | length of the straight pieces curves are cut into, mm |
 
-Orientation: seen from above with the arm pointing to the right (+X), the
-drawing reads upright, like in any G-code viewer. To read it upright
-standing behind the shoulder and looking along the arm (top of the
-drawing toward +X), use `--rotate -90`.
+Orientation: the arm stands in a vertical plane with the table on the +Y
+side, so facing it with the arm pointing to the right (+X) and the table at
+the bottom, the drawing reads upright: the top of the SVG goes to -Y (up,
+away from the table). A G-code viewer, which draws +Y up, shows it upside
+down. If it comes out mirrored, you are looking at the arm from the other
+side: use `--rotate 180` and mirror the SVG, or tell the page the same.
 
 The output uses only what `scara gcode` accepts: `G21 G90`, `G28`, then for
 each stroke `G0` to its start, `M3`, `G1` pieces (F on the first), `M5`,
@@ -92,10 +94,11 @@ X/Y are mm from the shoulder axis, X along the straight arm. With
 L1 = 195.4 and L2 = 166.4 and the joint limits in `tmc2209.conf`
 (shoulder -109.25..111.75, elbow -171..166):
 
-- The tip never goes below `min_y_mm` (0: the X axis, where the table
-  is), so drawings sit above it. The default, a 150 mm square centred on
-  X200 Y90 (X 125..275, Y 15..165), is well inside the reach.
-- A bigger drawing has to stay in Y >= 0 and inside the reach; grow the
+- The table is on the +Y side and the tip never goes past `max_y_mm` (0:
+  the X axis), so drawings sit at negative Y, above it. The default, a
+  150 mm square centred on X200 Y-90 (X 125..275, Y -165..-15), is well
+  inside the reach.
+- A bigger drawing has to stay in Y <= 0 and inside the reach; grow the
   size step by step, the base and the cables may limit it first.
 - `scara gcode -n` on the board checks every point (reach, limits,
   passing too close to the shoulder) and names the first bad line without
@@ -103,7 +106,7 @@ L1 = 195.4 and L2 = 166.4 and the joint limits in `tmc2209.conf`
   with one elbow side.
 
 The examples on the board (`/usr/share/scara/square.gcode`, `spiral.gcode`,
-`rgb.gcode`) also sit above the X axis, around X200 Y70..90.
+`rgb.gcode`) also sit above the X axis, around X200 Y-70..-90.
 
 ## 3. Copy to the board
 

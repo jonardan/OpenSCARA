@@ -110,7 +110,7 @@ M3/M5 stops there. After `G28` the arm is folded, so start with a `G0`.
 ```bash
 scara gcode -n /usr/share/scara/square.gcode   # check only
 scara gcode /usr/share/scara/square.gcode      # 100 mm square, stops at each corner
-scara gcode /usr/share/scara/spiral.gcode      # one continuous spiral around X200 Y90
+scara gcode /usr/share/scara/spiral.gcode      # one continuous spiral around X200 Y-90
 ```
 
 `scara gcode -` is for a sender on the PC that waits for an answer to each
@@ -122,7 +122,7 @@ next one isn't there yet, so for drawings copy the file and run it.
 ```
 scara gcode -
 G28
-G0 X200 Y90                 -> moves, then ok
+G0 X200 Y-90                -> moves, then ok
 G1 X200 Y80 F600            -> line at 10 mm/s, then ok
 G1 X500                     -> error: out of reach, nothing moves
 ```
@@ -197,7 +197,7 @@ and `[motor2]` (elbow) override them for one motor.
 | `line_speed` | 20 | tip speed for `line` and G1 without F, mm/s |
 | `line_accel` | 400 | tip acceleration at the start and end of a line or path, mm/s² |
 | `corner_deg` | 15 | G1 lines turning by at most this many degrees run as one path; 0 stops at every line |
-| `min_y_mm` | 0 | the tip never goes below this Y (the table; 0 = the X axis): points, lines and G1 are refused below it, and a `goto`/`G0` whose joint move would swing the tip below it runs as a straight line. `off` removes the limit |
+| `max_y_mm` | 0 | the table is on the +Y side: the tip never goes past this Y (0 = the X axis). Points, lines and G1 past it are refused; a `goto`/`G0` whose joint move would swing the tip past it turns the shoulder and the elbow one at a time, or goes straight. `off` removes the limit |
 | `led_red` / `led_green` / `led_blue` | tip-red / tip-green / tip-blue | the tip LED's channels in `/sys/class/leds` (P8_12, P8_13, P8_19 in the device tree) |
 | `led_common` | cathode | `anode` for a common anode RGB LED (its long leg on 3.3 V): the pins are inverted |
 | `home_dir` | 1 / 1 | 1 if a positive `turn` moves the joint toward its switch, -1 if away; 0 refuses to home |
@@ -240,16 +240,16 @@ accepts. Strokes are ordered nearest-first to cut the travel between them.
 |---|---|---|
 | `-o FILE` | stdout | output G-code file |
 | `--size` | 150 | longer side of the drawing, mm |
-| `--center` | 200,90 | centre of the drawing, X,Y in mm |
+| `--center` | 200,-90 | centre of the drawing, X,Y in mm |
 | `--rotate` | 0 | turn the drawing counter-clockwise, degrees |
 | `--feed` | 1200 | drawing speed, mm/min (1200 = 20 mm/s) |
 | `--step` | 1 | length of the straight pieces curves are cut into, mm |
 
 ```bash
-python3 tools/svg2gcode.py logo.svg -o logo.gcode --size 120 --center 210,100 --feed 900
+python3 tools/svg2gcode.py logo.svg -o logo.gcode --size 120 --center 210,-100 --feed 900
 ```
 
-A 150 mm drawing centred on X200 Y90 fits comfortably; `scara gcode -n`
+A 150 mm drawing centred on X200 Y-90 fits comfortably; `scara gcode -n`
 tells you if a bigger one doesn't.
 
 ### `tools/bbb_send.py`

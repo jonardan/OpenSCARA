@@ -4,14 +4,15 @@
 Every stroke of the drawing becomes: G0 to its start, M3, G1 segments, M5.
 Curves are cut into short straight segments (--step mm). The drawing is
 scaled so its longer side is --size mm and centred on --center X,Y (mm,
-robot coordinates). Seen from above with the arm pointing right (+X), the
-drawing reads upright; --rotate turns it counter-clockwise.
+robot coordinates). Facing the arm with it pointing right (+X) and the
+table (+Y) at the bottom, the drawing reads upright; --rotate turns it
+counter-clockwise.
 
 Text: in Inkscape use Extensions > Text > Hershey Text (single-line fonts);
 other text must be turned into paths first (Path > Object to Path).
 
     python3 tools/svg2gcode.py drawing.svg -o drawing.gcode
-    python3 tools/svg2gcode.py logo.svg --size 120 --center 210,100 --feed 900
+    python3 tools/svg2gcode.py logo.svg --size 120 --center 210,-100 --feed 900
 
 Python standard library only.
 """
@@ -308,8 +309,8 @@ def main():
     ap.add_argument("-o", "--output", help="G-code file (default: stdout)")
     ap.add_argument("--size", type=float, default=150,
                     help="longer side of the drawing, mm (default 150)")
-    ap.add_argument("--center", default="200,90",
-                    help="centre of the drawing X,Y in mm (default 200,90: above the X axis)")
+    ap.add_argument("--center", default="200,-90",
+                    help="centre of the drawing X,Y in mm (default 200,-90: clear of the table)")
     ap.add_argument("--rotate", type=float, default=0,
                     help="turn the drawing counter-clockwise, degrees")
     ap.add_argument("--feed", type=float, default=1200,
@@ -338,8 +339,10 @@ def main():
     mx, my = (x0 + x1) / 2, (y0 + y1) / 2
 
     def robot(p):
-        u, v = (p[0] - mx) * k, (my - p[1]) * k       # SVG y points down
-        return cx + cr * u - sr * v, cy + sr * u + cr * v
+        # u right, w up as you face the arm (table at the bottom); SVG y
+        # points down, and so does robot +Y (towards the table)
+        u, w = (p[0] - mx) * k, (my - p[1]) * k
+        return cx + cr * u - sr * w, cy - (sr * u + cr * w)
 
     clean = []
     for s in strokes:

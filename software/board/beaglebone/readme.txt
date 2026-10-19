@@ -362,7 +362,7 @@ G-code: scara gcode
   scara gcode /usr/share/scara/square.gcode
   scara gcode /usr/share/scara/rgb.gcode   # each side a colour
 
-  A spiral around X200 Y90, 5 to 80 mm radius in 5 turns, as 360 G1
+  A spiral around X200 Y-90, 5 to 80 mm radius in 5 turns, as 360 G1
   segments (about a minute at 20 mm/s). In a file,
   consecutive G1 lines at the same feed run as one path without slowing
   down at the joins, as long as the direction turns by at most corner_deg
@@ -379,7 +379,7 @@ G-code: scara gcode
 
   scara gcode -
   G28
-  G0 X200 Y90                 -> moves, then ok
+  G0 X200 Y-90                -> moves, then ok
   G1 X200 Y80 F600            -> line at 10 mm/s, then ok
   G1 X500                     -> error: out of reach, nothing moves
 

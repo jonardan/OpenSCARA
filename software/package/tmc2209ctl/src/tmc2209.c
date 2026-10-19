@@ -168,9 +168,9 @@ static int set_option(const char *key, const char *val)
 		cfg.line_accel = atof(val);
 	else if (!strcmp(key, "corner_deg"))
 		cfg.corner_deg = atof(val);
-	else if (!strcmp(key, "min_y_mm")) {
-		cfg.min_y_off = !strcmp(val, "off");
-		cfg.min_y_mm = cfg.min_y_off ? 0 : atof(val);
+	else if (!strcmp(key, "max_y_mm")) {
+		cfg.max_y_off = !strcmp(val, "off");
+		cfg.max_y_mm = cfg.max_y_off ? 0 : atof(val);
 	} else if (!strcmp(key, "led_red") || !strcmp(key, "led"))
 		snprintf(cfg.led_red, sizeof(cfg.led_red), "%s", val);
 	else if (!strcmp(key, "led_green"))
