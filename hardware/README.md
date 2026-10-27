@@ -1,7 +1,7 @@
 # 🖨️ OpenSCARA hardware
 
 The 3D-printed parts of the [OpenSCARA](../README.md) arm, exported from
-the Fusion design "robot claude" (v41).
+the Fusion design "robot claude" (v48).
 
 ## 🌟 Highlights
 
@@ -39,6 +39,26 @@ The file names are in Italian: *Base*, *Spalla* (shoulder), *Braccio*
 Bodies named `RIF_*` in the design (NEMA 17 motor, 20T motor pulley,
 elbow endstop) are bought parts kept only as references, so they have no
 STL.
+
+## 🔧 Tensioning the shoulder belt
+
+The shoulder belt tensions itself. The motor sits in long slots in
+`Base_SupportoPosteriore` (6.9 mm of travel: 4.4 mm further from the
+shoulder than the original position, 2.5 mm closer), and two compression
+springs (7 mm outside, 5 mm inside, 30 mm long) in blind pockets above
+the motor push it away from the shoulder. Each pocket is 17.5 mm deep,
+so a spring is compressed by 12 mm with the motor closest to the
+shoulder and by 5 mm at the far end of the slots.
+
+1. Push a spring into each pocket and hold it there with a pin through
+   the 3.2 mm cross hole (an M3 screw, a 3 mm rod or a hex key).
+2. Slide the motor in, put the belt on and fit the four motor screws:
+   snug, then back them off about a quarter turn, so the motor can still
+   slide.
+3. Pull the pin out: the springs push the motor down and tighten the belt.
+
+If the belt is still loose, add a washer on top of each spring; if the
+motor gets stuck at the end of its slots, the springs are too strong.
 
 ## ➡️ Next
 
