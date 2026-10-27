@@ -1,5 +1,6 @@
 # Builds the Flipper Zero app in tools/flipper-scara and keeps the .fap
-# as a workflow artifact (Actions tab -> run -> Artifacts).
+# as a workflow artifact (Actions tab -> run -> Artifacts); a push also
+# puts it alone on the branch flipper-fap, for a direct download link.
 name: Flipper SCARA IR
 
 on:
@@ -12,6 +13,9 @@ on:
       - "tools/flipper-scara/**"
       - ".github/workflows/flipper-scara.yml"
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -28,3 +32,13 @@ jobs:
         with:
           name: scara_ir-${{ steps.build-app.outputs.suffix }}
           path: ${{ steps.build-app.outputs.fap-artifacts }}
+      - name: Publish the .fap on the flipper-fap branch
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir /tmp/fap && cp ${{ steps.build-app.outputs.fap-artifacts }} /tmp/fap/
+          cd /tmp/fap
+          git init -q -b flipper-fap
+          git add .
+          git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com \
+            commit -qm "scara_ir.fap from ${GITHUB_SHA::7} (${GITHUB_REF_NAME}), SDK ${{ steps.build-app.outputs.suffix }}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}" flipper-fap

@@ -49,3 +49,6 @@ In locale, con [ufbt](https://pypi.org/project/ufbt/):
 `ufbt` scarica l'SDK del firmware ufficiale (release). Con un firmware
 diverso (Momentum, Unleashed, ...) usa `ufbt update --index-url=...` del
 firmware che hai.
+
+Dopo ogni push l'ultimo `scara_ir.fap` compilato sta da solo sul ramo
+`flipper-fap`: <https://github.com/jonardan/OpenSCARA/raw/flipper-fap/scara_ir.fap>.
