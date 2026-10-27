@@ -1,7 +1,7 @@
 # 🖨️ OpenSCARA hardware
 
 The 3D-printed parts of the [OpenSCARA](../README.md) arm, exported from
-the Fusion design "robot claude" (v47).
+the Fusion design "robot claude" (v48).
 
 ## 🌟 Highlights
 
@@ -42,11 +42,13 @@ STL.
 
 ## 🔧 Tensioning the shoulder belt
 
-The shoulder belt tensions itself. The motor sits in slots in
-`Base_SupportoPosteriore`, and two compression springs (7 mm outside,
-5 mm inside, 30 mm long) in pockets above the motor push it away from
-the shoulder. Each pocket is 21 mm deep, so a spring is compressed about
-6 mm with the motor in the middle of its slots.
+The shoulder belt tensions itself. The motor sits in long slots in
+`Base_SupportoPosteriore` (6.9 mm of travel: 4.4 mm further from the
+shoulder than the original position, 2.5 mm closer), and two compression
+springs (7 mm outside, 5 mm inside, 30 mm long) in blind pockets above
+the motor push it away from the shoulder. Each pocket is 17.5 mm deep,
+so a spring is compressed by 12 mm with the motor closest to the
+shoulder and by 5 mm at the far end of the slots.
 
 1. Push a spring into each pocket and hold it there with a pin through
    the 3.2 mm cross hole (an M3 screw, a 3 mm rod or a hex key).
