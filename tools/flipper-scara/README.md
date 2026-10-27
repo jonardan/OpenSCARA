@@ -17,6 +17,11 @@ Flipper manda il codice e poi i codici di ripetizione NEC, come il telecomando
 vero: il braccio si muove in continuo e si ferma appena lasci il tasto. Una
 freccia alla volta: le altre vengono ignorate finché non lasci la prima.
 
+A sinistra c'è un piccolo SCARA visto dall'alto: segue le frecce e, mentre
+il Flipper trasmette, il LED sulla punta si accende e lascia una scia (come
+nel light painting). Se non tocchi niente per 3 secondi gira da solo
+disegnando un otto.
+
 Il LED IR del Flipper è in alto: puntalo verso il ricevitore VS1838 (P8_16).
 
 ## Installare
