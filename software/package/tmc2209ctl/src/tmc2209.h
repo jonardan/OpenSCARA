@@ -167,6 +167,14 @@ int move_path(int count, const int *mi, int npts, const long *pts,
  */
 extern int (*path_stop)(void);
 
+/*
+ * Set for move_path(): each part of the path runs as fast as the motors
+ * allow there (up to *speed), slowing only where a motor would go over
+ * its rpm.  Unset: the whole path at one speed, the slowest any part
+ * needs (even light for drawing).
+ */
+extern int path_local;
+
 int home_motors(int n, const int *mi);
 
 #endif

@@ -605,7 +605,9 @@ static int cmd_jog(int argc, char **argv)
  * an arrow moves the tip in a straight line at F mm/s (default
  * line_speed) for as long as the remote keeps repeating the code, and it
  * decelerates to a stop when the button is let go: the move is planned up
- * to the reach or joint limit, and path_stop ends it early.  Seen from
+ * to the reach or joint limit, and path_stop ends it early.  path_local
+ * slows the tip only where a motor can't keep up (near full reach or the
+ * shoulder), not over the whole planned line.  Seen from
  * the remote, up is +X and right is +Y.  The table check (max_y_mm) is
  * off: whoever holds the remote watches the tip.  Ctrl-C ends.  'ir test'
  * only prints the code of every button pressed.
@@ -757,8 +759,10 @@ static int cmd_ir(int argc, char **argv)
 		ir_key = code;
 		clock_gettime(CLOCK_MONOTONIC, &ir_last);
 		path_stop = ir_let_go;
+		path_local = 1;
 		r = line_to(&a, x + dirs[i].dx * room, y + dirs[i].dy * room,
 			    speed);
+		path_local = 0;
 		path_stop = NULL;
 		if (stopped)
 			break;
