@@ -7,9 +7,9 @@ tmc2209ctl: tmc2209ctl.c tmc2209.c tmc2209.h
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ tmc2209ctl.c tmc2209.c -lm
 
 scara: scara.c tmc2209.c tmc2209.h kinematics.c kinematics.h line.c line.h \
-		gcode.c gcode.h
+		gcode.c gcode.h ir.c ir.h
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ scara.c tmc2209.c kinematics.c line.c \
-		gcode.c -lm
+		gcode.c ir.c -lm
 
 # Pure math, run on the PC: make test
 test_kinematics: test_kinematics.c kinematics.c kinematics.h

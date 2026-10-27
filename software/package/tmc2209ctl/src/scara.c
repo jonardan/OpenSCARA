@@ -20,8 +20,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "gcode.h"
+#include "ir.h"
 #include "kinematics.h"
 #include "line.h"
 #include "tmc2209.h"
@@ -71,6 +73,11 @@ static void usage(void)
 "  led [COLOR]           set the tip RGB LED, or print its color: off,\n"
 "                        on (white), red, green, blue, yellow, cyan,\n"
 "                        magenta, orange, purple, #rrggbb or R G B (0-255)\n"
+"  ir [MM]               drive the tip with an IR remote (receiver on\n"
+"                        P8_16): press UP, DOWN, RIGHT, LEFT when asked,\n"
+"                        then each press moves the tip MM mm (default 5),\n"
+"                        held = keeps going; up is away from the table.\n"
+"                        Needs homing.  ir test prints the button codes\n"
 "\n"
 "  Angles: shoulder from the +X axis, elbow from the line of link 1\n"
 "  (0 = straight), counter-clockwise positive seen from above.  X/Y in\n"
@@ -588,6 +595,125 @@ static int cmd_jog(int argc, char **argv)
 		return -1;
 	usteps = lround(deg * upd);
 	return move_joints(1, &j, &usteps, rpm);
+}
+
+/*
+ * ir [MM | test]: drive the tip with an IR remote.  Its codes are not
+ * known in advance, so the four arrow buttons are learned first, then
+ * each press moves the tip MM mm (default IR_STEP_MM) in a straight line,
+ * and holding a button keeps it moving.  The arm stands upright with the
+ * table on +Y, so up is -Y (away from the table) and right is +X.  A step
+ * the arm can't make (out of reach, past a joint limit, into the table)
+ * is refused and the tip stays.  Ctrl-C ends.  'ir test' only prints the
+ * code of every button pressed.
+ */
+#define IR_STEP_MM	5
+#define IR_QUIET_MS	300	/* a press is over after this long without codes */
+
+static int cmd_ir(int argc, char **argv)
+{
+	static const struct {
+		const char *name;
+		double dx, dy;
+	} dirs[] = {
+		{ "UP", 0, -1 }, { "DOWN", 0, 1 },
+		{ "RIGHT", 1, 0 }, { "LEFT", -1, 0 },
+	};
+	const int ndirs = sizeof(dirs) / sizeof(dirs[0]);
+	double step = IR_STEP_MM, th[NJOINTS], x, y;
+	uint32_t key[4], code;
+	int fd, i, j, r, test = 0;
+	struct arm a;
+
+	if (argc > 2) {
+		err("usage: ir [MM|test]");
+		return -1;
+	}
+	if (argc == 2 && !strcmp(argv[1], "test"))
+		test = 1;
+	else if (argc == 2 && parse_num(argv[1], &step))
+		return -1;
+	if (step <= 0) {
+		err("the step must be > 0 mm");
+		return -1;
+	}
+	if (!test) {
+		if (get_arm(&a))
+			return -1;
+		if (get_angles(th)) {
+			err("the arm is not homed; run 'scara home'");
+			return -1;
+		}
+	}
+	fd = ir_open();
+	if (fd < 0)
+		return -1;
+	if (test) {
+		printf("press buttons on the remote, Ctrl-C ends\n");
+		while (ir_read(fd, -1, &code) > 0) {
+			printf("0x%08x\n", code);
+			fflush(stdout);
+		}
+		goto out;
+	}
+
+	for (i = 0; i < ndirs; i++) {
+		printf("press %s on the remote... ", dirs[i].name);
+		fflush(stdout);
+		for (;;) {
+			/* One press, and the repeats while it is held */
+			if (ir_read(fd, -1, &code) <= 0 ||
+			    ir_drain(fd, IR_QUIET_MS) < 0)
+				goto out;
+			for (j = 0; j < i && key[j] != code; j++)
+				;
+			if (j == i)
+				break;
+			printf("\n0x%08x is already %s; press %s... ", code,
+			       dirs[j].name, dirs[i].name);
+			fflush(stdout);
+		}
+		key[i] = code;
+		printf("0x%08x\n", code);
+	}
+	printf("ready: the arrows move the tip %.1f mm, Ctrl-C ends\n", step);
+
+	quiet = 1;
+	while ((r = ir_read(fd, -1, &code)) > 0) {
+		for (i = 0; i < ndirs && key[i] != code; i++)
+			;
+		if (i == ndirs)
+			continue;
+		if (get_angles(th))
+			break;
+		kin_forward(&a, th, &x, &y);
+		x += dirs[i].dx * step;
+		y += dirs[i].dy * step;
+		if (line_to(&a, x, y, motors[0].line_speed)) {
+			/* Refused: wait for the button to be let go */
+			if (ir_drain(fd, IR_QUIET_MS) < 0)
+				break;
+			continue;
+		}
+		if (stopped)
+			break;
+		printf("%-5s tip: x %7.2f, y %7.2f\n", dirs[i].name, x, y);
+		fflush(stdout);
+		/*
+		 * The codes that came during the move: dropped, or the tip
+		 * would keep going after the button is let go.  A held button
+		 * sends the next one within ~110 ms.
+		 */
+		if (ir_drain(fd, 0) < 0)
+			break;
+	}
+	quiet = 0;
+out:
+	close(fd);
+	printf("\n");
+	if (!test)
+		cmd_where();
+	return stop_req || stopped ? 0 : -1;
 }
 
 /* home [1|2|all]: the elbow first, so the arm is folded before the shoulder swings */
@@ -1250,6 +1376,8 @@ int main(int argc, char **argv)
 		return cmd_line(argc, argv) ? 1 : 0;
 	if (!strcmp(c, "gcode"))
 		return cmd_gcode(argc, argv) ? 1 : 0;
+	if (!strcmp(c, "ir"))
+		return cmd_ir(argc, argv) ? 1 : 0;
 	err("unknown command '%s' (try 'scara help')", c);
 	return 1;
 }
