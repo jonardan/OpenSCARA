@@ -1,0 +1,30 @@
+# Builds the Flipper Zero app in tools/flipper-scara and keeps the .fap
+# as a workflow artifact (Actions tab -> run -> Artifacts).
+name: Flipper SCARA IR
+
+on:
+  push:
+    paths:
+      - "tools/flipper-scara/**"
+      - ".github/workflows/flipper-scara.yml"
+  pull_request:
+    paths:
+      - "tools/flipper-scara/**"
+      - ".github/workflows/flipper-scara.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with ufbt
+        id: build-app
+        uses: flipperdevices/flipperzero-ufbt-action@v0.1
+        with:
+          app-dir: tools/flipper-scara
+          sdk-channel: release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scara_ir-${{ steps.build-app.outputs.suffix }}
+          path: ${{ steps.build-app.outputs.fap-artifacts }}
