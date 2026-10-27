@@ -20,6 +20,9 @@
  *     P8_12  GPIO1_12   red   (gpio-leds, on/off: P8_12 has no PWM)
  *     P8_13  EHRPWM2B   green (pwm-leds, brightness 0-255)
  *     P8_19  EHRPWM2A   blue  (pwm-leds, brightness 0-255)
+ *   IR receiver (VS1838, powered from P9_3 3.3 V; /sys/class/rc/rc0)
+ *     P8_16  GPIO1_14   OUT   (gpio-ir-recv, low while it sees 38 kHz),
+ *                       with 10k to 3.3 V: the internal pull-up is too weak
  *
  * STEP 2 was on P9_28 but that pin stays at ~3.3 V even when driven low
  * (measured 2026-10-09, shield removed), so it moved to P9_12. HDMI audio
@@ -61,6 +64,14 @@
 			default-state = "off";
 		};
 	};
+
+	/* Decoded by the kernel: scara ir reads the scancodes */
+	ir-receiver {
+		compatible = "gpio-ir-receiver";
+		pinctrl-names = "default";
+		pinctrl-0 = <&ir_pins>;
+		gpios = <&gpio1 14 GPIO_ACTIVE_LOW>;
+	};
 };
 
 &am33xx_pinmux {
@@ -94,6 +105,13 @@
 		pinctrl-single,pins = <
 			AM33XX_PADCONF(AM335X_PIN_GPMC_AD9, PIN_OUTPUT_PULLDOWN, MUX_MODE4)	/* P8_13 ehrpwm2B green */
 			AM33XX_PADCONF(AM335X_PIN_GPMC_AD8, PIN_OUTPUT_PULLDOWN, MUX_MODE4)	/* P8_19 ehrpwm2A blue */
+		>;
+	};
+
+	/* The VS1838 output idles high; the pull-up keeps it there unplugged */
+	ir_pins: ir-pins {
+		pinctrl-single,pins = <
+			AM33XX_PADCONF(AM335X_PIN_GPMC_AD14, PIN_INPUT_PULLUP, MUX_MODE7)	/* P8_16 IR receiver */
 		>;
 	};
 

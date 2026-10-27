@@ -1196,14 +1196,61 @@ static double path_cap(int count, const struct axis *ax, int npts,
 	return cap;
 }
 
+int (*path_stop)(void);
+int path_local;
+
+/*
+ * For path_local: the speed limit of every segment (cap[i], from point
+ * i - 1 to i: no motor over its rpm or MAX_STEP_RATE there, nor over
+ * speed) and the highest speed at every point (top[i]) that stays under
+ * the caps on both sides and that the acceleration can reach from the
+ * start and brake from to the end, both at v0.  One array: top, then cap.
+ */
+static double *path_profile(int count, const struct axis *ax, int npts,
+			    const long *pts, const double *dist, double speed,
+			    double accel, double v0)
+{
+	double *top = malloc(2 * npts * sizeof(*top)), *cap = top + npts;
+	int i, k;
+
+	if (!top) {
+		err("out of memory");
+		return NULL;
+	}
+	for (i = 1; i < npts; i++) {
+		cap[i] = speed;
+		for (k = 0; k < count; k++) {
+			double rate = fmin(MAX_STEP_RATE,
+					   motors[ax[k].motor].rpm / 60.0 *
+					   ax[k].upr);
+			long d = labs(pts[i * count + k] -
+				      pts[(i - 1) * count + k]);
+
+			if (d)
+				cap[i] = fmin(cap[i],
+					      rate * (dist[i] - dist[i - 1]) / d);
+		}
+	}
+	top[0] = top[npts - 1] = fmin(v0, fmin(cap[1], cap[npts - 1]));
+	for (i = 1; i < npts - 1; i++)
+		top[i] = fmin(cap[i], cap[i + 1]);
+	for (i = 1; i < npts; i++)
+		top[i] = fmin(top[i], sqrt(top[i - 1] * top[i - 1] + 2 * accel *
+					   (dist[i] - dist[i - 1])));
+	for (i = npts - 2; i >= 0; i--)
+		top[i] = fmin(top[i], sqrt(top[i + 1] * top[i + 1] + 2 * accel *
+					   (dist[i + 1] - dist[i])));
+	return top;
+}
+
 int move_path(int count, const int *mi, int npts, const long *pts,
 	      const double *dist, double *speed, double accel,
 	      int *interrupted)
 {
 	struct axis ax[MAX_MOTORS];
 	struct timespec next;
-	double v0, end;
-	int i, k, dir[MAX_MOTORS], ret = -1;
+	double v0, end, *top = NULL, *cap = NULL;
+	int i, k, dir[MAX_MOTORS], soft = 0, ret = -1;
 
 	*interrupted = 0;
 	if (*speed <= 0 || accel <= 0 || npts < 2) {
@@ -1229,10 +1276,18 @@ int move_path(int count, const int *mi, int npts, const long *pts,
 		if (axis_lines(&ax[k], dir[k] > 0))
 			goto out;
 	}
-	*speed = fmin(*speed, path_cap(count, ax, npts, pts, dist));
+	if (!path_local)
+		*speed = fmin(*speed, path_cap(count, ax, npts, pts, dist));
 
 	end = dist[npts - 1];
 	v0 = fmin(*speed, sqrt(2 * accel * PATH_V0_DIST));
+	if (path_local) {
+		top = path_profile(count, ax, npts, pts, dist, *speed, accel,
+				   v0);
+		if (!top)
+			goto out;
+		cap = top + npts;
+	}
 
 	rt_enter();
 	stop_req = 0;
@@ -1244,6 +1299,8 @@ int move_path(int count, const int *mi, int npts, const long *pts,
 
 		if (s0 >= end)
 			break;
+		if (!soft && path_stop && path_stop())
+			soft = 1;
 		for (k = 0; k < count; k++) {
 			d[k] = pts[i * count + k] - pts[(i - 1) * count + k];
 			ax[k].n = labs(d[k]);
@@ -1260,6 +1317,8 @@ int move_path(int count, const int *mi, int npts, const long *pts,
 			/* Neither motor moves on this segment: just wait */
 			double v = fmin(*speed, sqrt(v0 * v0 + 2 * accel * s0));
 
+			if (top)
+				v = fmin(v, top[i - 1]);
 			next_after(&next, seg / v);
 			continue;
 		}
@@ -1273,12 +1332,21 @@ int move_path(int count, const int *mi, int npts, const long *pts,
 					     fmax(0, end - s))));
 			int fire[MAX_MOTORS];
 
-			if (stop_req) {
-				/* Ctrl-C: decelerate along the path to a stop */
+			/* path_local: this segment's cap, ramped from/to its ends */
+			if (top)
+				v = fmin(v, fmin(cap[i],
+					 fmin(sqrt(top[i - 1] * top[i - 1] +
+						   2 * accel * (s - s0)),
+					      sqrt(top[i] * top[i] + 2 * accel *
+						   (dist[i] - s)))));
+			if (stop_req || soft == 1) {
+				/* Ctrl-C or path_stop: decelerate to a stop */
 				end = fmin(end, s + (v * v - v0 * v0) /
 					   (2 * accel));
+				if (stop_req)
+					*interrupted = 1;
 				stop_req = 0;
-				*interrupted = 1;
+				soft = 2;
 			}
 			if (s >= end)
 				break;
@@ -1306,6 +1374,7 @@ out:
 		if (!ret)
 			pos_add(ax[k].motor, ax[k].done);
 	}
+	free(top);
 	return ret;
 }
 
