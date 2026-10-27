@@ -6,6 +6,11 @@
  * rcN/protocols and its codes come as EV_MSC/MSC_SCAN events from the
  * input device rcN/inputM/eventK, i.e. /dev/input/eventK.  No keymap: the
  * scancodes are used as they are.
+ *
+ * The AM335x wakes from its deeper idle states ~1 ms after an interrupt,
+ * late enough to garble every NEC bit (560 us): while the receiver is
+ * open the CPU is kept out of them through /dev/cpu_dma_latency, which
+ * holds as long as the file stays open.
  */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -49,6 +54,20 @@ static int ir_enable(const char *rcdir)
 	return n;
 }
 
+/* Keep the CPU out of slow idle states until the program exits */
+static void ir_no_idle(void)
+{
+	static int fd = -1;
+	int32_t zero = 0;
+
+	if (fd >= 0)
+		return;
+	fd = open("/dev/cpu_dma_latency", O_WRONLY | O_CLOEXEC);
+	if (fd < 0 || write(fd, &zero, sizeof(zero)) != sizeof(zero))
+		fprintf(stderr, "warning: /dev/cpu_dma_latency: %s; the remote "
+			"may not be decoded\n", strerror(errno));
+}
+
 int ir_open(void)
 {
 	char ev[PATH_MAX], rcdir[PATH_MAX], dev[PATH_MAX + 16], *slash;
@@ -69,6 +88,7 @@ int ir_open(void)
 	for (i = 0; i < 2; i++)
 		if ((slash = strrchr(rcdir, '/')))
 			*slash = '\0';
+	ir_no_idle();
 	if (!ir_enable(rcdir)) {
 		err("%s: no IR decoder could be switched on", rcdir);
 		return -1;
