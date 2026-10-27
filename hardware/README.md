@@ -1,7 +1,7 @@
 # 🖨️ OpenSCARA hardware
 
 The 3D-printed parts of the [OpenSCARA](../README.md) arm, exported from
-the Fusion design "robot claude" (v46).
+the Fusion design "robot claude" (v47).
 
 ## 🌟 Highlights
 
@@ -42,18 +42,21 @@ STL.
 
 ## 🔧 Tensioning the shoulder belt
 
-The shoulder motor sits in slots in `Base_SupportoPosteriore`, and a
-block above the motor holds two M3 push screws (x = ±16 mm, 2.7 mm
-holes, self-tapping in the plastic, M3×16 to M3×20). Moving the motor
-away from the shoulder tightens the belt; the screws keep it from creeping
-back.
+The shoulder belt tensions itself. The motor sits in slots in
+`Base_SupportoPosteriore`, and two compression springs (7 mm outside,
+5 mm inside, 30 mm long) in pockets above the motor push it away from
+the shoulder. Each pocket is 21 mm deep, so a spring is compressed about
+6 mm with the motor in the middle of its slots.
 
-1. Loosen the four motor screws a little, so the motor slides.
-2. Turn both push screws in by the same amount until the belt is tight
-   (it should twang, not flap).
-3. Tighten the four motor screws again.
+1. Push a spring into each pocket and hold it there with a pin through
+   the 3.2 mm cross hole (an M3 screw, a 3 mm rod or a hex key).
+2. Slide the motor in, put the belt on and fit the four motor screws:
+   snug, then back them off about a quarter turn, so the motor can still
+   slide.
+3. Pull the pin out: the springs push the motor down and tighten the belt.
 
-Back the push screws out before you slide the motor in or out.
+If the belt is still loose, add a washer on top of each spring; if the
+motor gets stuck at the end of its slots, the springs are too strong.
 
 ## ➡️ Next
 
