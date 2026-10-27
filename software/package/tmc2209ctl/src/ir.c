@@ -7,10 +7,12 @@
  * input device rcN/inputM/eventK, i.e. /dev/input/eventK.  No keymap: the
  * scancodes are used as they are.
  *
- * The AM335x wakes from its deeper idle states ~1 ms after an interrupt,
- * late enough to garble every NEC bit (560 us): while the receiver is
- * open the CPU is kept out of them through /dev/cpu_dma_latency, which
- * holds as long as the file stays open.
+ * The AM335x can take ~1 ms to wake from its deeper idle states after an
+ * interrupt, as long as an NEC bit (560 us): while the receiver is open
+ * the CPU is kept out of them through /dev/cpu_dma_latency, which holds
+ * as long as the file stays open.  (The garbled frames seen on
+ * 2026-10-27 were mostly the receiver's slow rise at 3.3 V, fixed with a
+ * 10k pull-up on P8_16.)
  */
 #define _GNU_SOURCE
 #include <errno.h>

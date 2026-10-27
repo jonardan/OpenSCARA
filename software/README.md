@@ -96,7 +96,7 @@ flowchart LR
 | P8_13 | EHRPWM2B | tip LED green, through 150 Ω | kernel LED `tip-green`, PWM 0-255 |
 | P8_19 | EHRPWM2A | tip LED blue, through 150 Ω | kernel LED `tip-blue`, PWM 0-255 |
 | P8_2 | GND | tip LED common cathode | P8_1 works too; a common anode LED goes to P9_3 (3.3 V) instead |
-| P8_16 | GPIO1_14 | IR receiver (VS1838) OUT | kernel `gpio-ir-recv`, internal pull-up; the receiver's VCC on P9_3 (3.3 V, never 5 V), GND on P9_1. Bare VS1838 seen from the dome, left to right: OUT, GND, VCC |
+| P8_16 | GPIO1_14 | IR receiver (VS1838) OUT, plus a 10 kΩ resistor from it to 3.3 V (P9_3) | kernel `gpio-ir-recv`. The 10 kΩ pull-up is needed: without it the output rises too slowly at 3.3 V and every NEC frame is garbled (measured 2026-10-27); the receiver's VCC on P9_3 (3.3 V, never 5 V), GND on P9_1. Bare VS1838 seen from the dome, left to right: OUT, GND, VCC |
 
 ### TMC2209 drivers
 

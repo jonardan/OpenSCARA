@@ -21,7 +21,8 @@
  *     P8_13  EHRPWM2B   green (pwm-leds, brightness 0-255)
  *     P8_19  EHRPWM2A   blue  (pwm-leds, brightness 0-255)
  *   IR receiver (VS1838, powered from P9_3 3.3 V; /sys/class/rc/rc0)
- *     P8_16  GPIO1_14   OUT   (gpio-ir-recv, low while it sees 38 kHz)
+ *     P8_16  GPIO1_14   OUT   (gpio-ir-recv, low while it sees 38 kHz),
+ *                       with 10k to 3.3 V: the internal pull-up is too weak
  *
  * STEP 2 was on P9_28 but that pin stays at ~3.3 V even when driven low
  * (measured 2026-10-09, shield removed), so it moved to P9_12. HDMI audio
