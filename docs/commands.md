@@ -48,7 +48,7 @@ file instead of `/etc/tmc2209.conf`. `scara help` prints the list.
 | `scara gcode [-n] FILE` | Runs a G-code file (below). `-n` only checks it. |
 | `scara gcode [-n] -` | Streams G-code from stdin, answering `ok` or `error` per line. |
 | `scara led [COLOR]` | Sets the tip RGB LED by hand: `off`, `on` (white), `red`, `green`, `blue`, `yellow`, `cyan`, `magenta`, `orange`, `purple`, `#rrggbb` or `R G B` (0-255). Alone it prints `led: R G B` or `led: off`. Red (P8_12) is on/off only. |
-| `scara ir [MM]` | Drives the tip with an IR remote (VS1838 receiver on P8_16). It first asks for the UP, DOWN, RIGHT and LEFT buttons and learns their codes, then each press moves the tip MM mm (default 5) in a straight line at `line_speed`; holding the button keeps it going. Up is -Y, away from the table; right is +X. The table check (`max_y_mm`) is off, since you watch the tip; a step out of reach or past a joint limit is refused and the tip stays. Ctrl-C ends. Needs homing. `scara ir test` only prints the code of each button pressed. |
+| `scara ir [F]` | Drives the tip with an IR remote (VS1838 receiver on P8_16). It first asks for the UP, DOWN, RIGHT and LEFT buttons and learns their codes. Then holding an arrow moves the tip smoothly in a straight line at F mm/s (default `line_speed`) and letting go decelerates it to a stop; at the reach or a joint limit it stops by itself. Seen from the remote, up is +X and right is +Y. `max_y_mm` is not enforced (you watch the table). Ctrl-C ends. Needs homing. `scara ir test` only prints the code of each button pressed. |
 
 RPM is the speed of the motor that moves furthest (default `rpm`). If a
 line would turn a motor faster than its `rpm`, the whole line runs slower

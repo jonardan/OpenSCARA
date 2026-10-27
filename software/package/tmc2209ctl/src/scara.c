@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "gcode.h"
@@ -73,10 +74,10 @@ static void usage(void)
 "  led [COLOR]           set the tip RGB LED, or print its color: off,\n"
 "                        on (white), red, green, blue, yellow, cyan,\n"
 "                        magenta, orange, purple, #rrggbb or R G B (0-255)\n"
-"  ir [MM]               drive the tip with an IR remote (receiver on\n"
+"  ir [F]                drive the tip with an IR remote (receiver on\n"
 "                        P8_16): press UP, DOWN, RIGHT, LEFT when asked,\n"
-"                        then each press moves the tip MM mm (default 5),\n"
-"                        held = keeps going; up is away from the table.\n"
+"                        then holding an arrow moves the tip smoothly at\n"
+"                        F mm/s (default line_speed) until let go.\n"
 "                        No table check (max_y_mm): you watch the tip.\n"
 "                        Needs homing.  ir test prints the button codes\n"
 "\n"
@@ -599,18 +600,71 @@ static int cmd_jog(int argc, char **argv)
 }
 
 /*
- * ir [MM | test]: drive the tip with an IR remote.  Its codes are not
- * known in advance, so the four arrow buttons are learned first, then
- * each press moves the tip MM mm (default IR_STEP_MM) in a straight line,
- * and holding a button keeps it moving.  The arm stands upright with the
- * table on +Y, so up is -Y (away from the table) and right is +X.  The
- * table check (max_y_mm) is off: whoever holds the remote watches the
- * tip.  A step out of reach or past a joint limit is refused and the tip
- * stays.  Ctrl-C ends.  'ir test' only prints the
- * code of every button pressed.
+ * ir [F | test]: drive the tip with an IR remote.  Its codes are not known
+ * in advance, so the four arrow buttons are learned first.  Then holding
+ * an arrow moves the tip in a straight line at F mm/s (default
+ * line_speed) for as long as the remote keeps repeating the code, and it
+ * decelerates to a stop when the button is let go: the move is planned up
+ * to the reach or joint limit, and path_stop ends it early.  Seen from
+ * the remote, up is +X and right is +Y.  The table check (max_y_mm) is
+ * off: whoever holds the remote watches the tip.  Ctrl-C ends.  'ir test'
+ * only prints the code of every button pressed.
  */
-#define IR_STEP_MM	5
-#define IR_QUIET_MS	300	/* a press is over after this long without codes */
+#define IR_MAX_MM	400	/* longest move planned for one hold */
+#define IR_MIN_MM	0.5	/* a shorter move is not worth starting */
+#define IR_QUIET_MS	200	/* let go: no code for this long (repeats ~110 ms) */
+
+static int ir_fd;
+static uint32_t ir_key;
+static struct timespec ir_last;	/* when ir_key last came */
+
+static double ms_since(const struct timespec *t)
+{
+	struct timespec now;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (now.tv_sec - t->tv_sec) * 1e3 + (now.tv_nsec - t->tv_nsec) / 1e6;
+}
+
+/* path_stop while an arrow is held: 1 once it is let go (or another comes) */
+static int ir_let_go(void)
+{
+	uint32_t code;
+
+	while (ir_read(ir_fd, 0, &code) > 0) {
+		if (code != ir_key)
+			return 1;
+		clock_gettime(CLOCK_MONOTONIC, &ir_last);
+	}
+	return ms_since(&ir_last) >= IR_QUIET_MS;
+}
+
+/*
+ * How far the tip can go from the joint angles th[] along dx, dy before
+ * it leaves the reach or a joint limit, up to IR_MAX_MM
+ */
+static double ir_room(const struct arm *a, const double th[NJOINTS],
+		      double dx, double dy)
+{
+	double x0, y0, t[NJOINTS], bx, by, ok = 0, bad = IR_MAX_MM, mid;
+
+	kin_forward(a, th, &x0, &y0);
+	memcpy(t, th, sizeof(t));
+	if (plan_line(a, x0 + dx * bad, y0 + dy * bad, t, &bx, &by) == KIN_OK)
+		return bad;
+	/* Just short of the first bad point, then halve to the edge */
+	bad = fmin(bad, fabs((bx - x0) * dx + (by - y0) * dy));
+	while (bad - ok > 0.1) {
+		mid = (ok + bad) / 2;
+		memcpy(t, th, sizeof(t));
+		if (plan_line(a, x0 + dx * mid, y0 + dy * mid, t, &bx,
+			      &by) == KIN_OK)
+			ok = mid;
+		else
+			bad = mid;
+	}
+	return ok;
+}
 
 static int cmd_ir(int argc, char **argv)
 {
@@ -618,25 +672,25 @@ static int cmd_ir(int argc, char **argv)
 		const char *name;
 		double dx, dy;
 	} dirs[] = {
-		{ "UP", 0, -1 }, { "DOWN", 0, 1 },
-		{ "RIGHT", 1, 0 }, { "LEFT", -1, 0 },
+		{ "UP", 1, 0 }, { "DOWN", -1, 0 },
+		{ "RIGHT", 0, 1 }, { "LEFT", 0, -1 },
 	};
 	const int ndirs = sizeof(dirs) / sizeof(dirs[0]);
-	double step = IR_STEP_MM, th[NJOINTS], x, y;
+	double speed = motors[0].line_speed, th[NJOINTS], x, y, room;
 	uint32_t key[4], code;
 	int fd, i, j, r, test = 0;
 	struct arm a;
 
 	if (argc > 2) {
-		err("usage: ir [MM|test]");
+		err("usage: ir [F|test]");
 		return -1;
 	}
 	if (argc == 2 && !strcmp(argv[1], "test"))
 		test = 1;
-	else if (argc == 2 && parse_num(argv[1], &step))
+	else if (argc == 2 && parse_num(argv[1], &speed))
 		return -1;
-	if (step <= 0) {
-		err("the step must be > 0 mm");
+	if (speed <= 0) {
+		err("the speed must be > 0 mm/s");
 		return -1;
 	}
 	if (!test) {
@@ -679,9 +733,11 @@ static int cmd_ir(int argc, char **argv)
 		key[i] = code;
 		printf("0x%08x\n", code);
 	}
-	printf("ready: the arrows move the tip %.1f mm, Ctrl-C ends\n", step);
+	printf("ready: hold an arrow to move the tip at %.1f mm/s, Ctrl-C "
+	       "ends\n", speed);
 
 	quiet = 1;
+	ir_fd = fd;
 	while ((r = ir_read(fd, -1, &code)) > 0) {
 		for (i = 0; i < ndirs && key[i] != code; i++)
 			;
@@ -689,25 +745,30 @@ static int cmd_ir(int argc, char **argv)
 			continue;
 		if (get_angles(th))
 			break;
-		kin_forward(&a, th, &x, &y);
-		x += dirs[i].dx * step;
-		y += dirs[i].dy * step;
-		if (line_to(&a, x, y, motors[0].line_speed)) {
-			/* Refused: wait for the button to be let go */
+		room = ir_room(&a, th, dirs[i].dx, dirs[i].dy);
+		if (room < IR_MIN_MM) {
+			printf("%-5s: at the limit\n", dirs[i].name);
+			fflush(stdout);
 			if (ir_drain(fd, IR_QUIET_MS) < 0)
 				break;
 			continue;
 		}
+		kin_forward(&a, th, &x, &y);
+		ir_key = code;
+		clock_gettime(CLOCK_MONOTONIC, &ir_last);
+		path_stop = ir_let_go;
+		r = line_to(&a, x + dirs[i].dx * room, y + dirs[i].dy * room,
+			    speed);
+		path_stop = NULL;
 		if (stopped)
 			break;
+		if (get_angles(th))
+			break;
+		kin_forward(&a, th, &x, &y);
 		printf("%-5s tip: x %7.2f, y %7.2f\n", dirs[i].name, x, y);
 		fflush(stdout);
-		/*
-		 * The codes that came during the move: dropped, or the tip
-		 * would keep going after the button is let go.  A held button
-		 * sends the next one within ~110 ms.
-		 */
-		if (ir_drain(fd, 0) < 0)
+		/* Still held at the limit: wait until it is let go */
+		if (!ir_let_go() && ir_drain(fd, IR_QUIET_MS) < 0)
 			break;
 	}
 	quiet = 0;

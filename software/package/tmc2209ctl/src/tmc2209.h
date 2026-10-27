@@ -160,6 +160,13 @@ int move_path(int count, const int *mi, int npts, const long *pts,
 	      const double *dist, double *speed, double accel,
 	      int *interrupted);
 
+/*
+ * Optional, for move_path(): called at the start of every segment; when it
+ * returns nonzero the path decelerates to a stop like on Ctrl-C, but
+ * without *interrupted.  NULL: never.
+ */
+extern int (*path_stop)(void);
+
 int home_motors(int n, const int *mi);
 
 #endif

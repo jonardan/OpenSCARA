@@ -1196,6 +1196,8 @@ static double path_cap(int count, const struct axis *ax, int npts,
 	return cap;
 }
 
+int (*path_stop)(void);
+
 int move_path(int count, const int *mi, int npts, const long *pts,
 	      const double *dist, double *speed, double accel,
 	      int *interrupted)
@@ -1203,7 +1205,7 @@ int move_path(int count, const int *mi, int npts, const long *pts,
 	struct axis ax[MAX_MOTORS];
 	struct timespec next;
 	double v0, end;
-	int i, k, dir[MAX_MOTORS], ret = -1;
+	int i, k, dir[MAX_MOTORS], soft = 0, ret = -1;
 
 	*interrupted = 0;
 	if (*speed <= 0 || accel <= 0 || npts < 2) {
@@ -1244,6 +1246,8 @@ int move_path(int count, const int *mi, int npts, const long *pts,
 
 		if (s0 >= end)
 			break;
+		if (!soft && path_stop && path_stop())
+			soft = 1;
 		for (k = 0; k < count; k++) {
 			d[k] = pts[i * count + k] - pts[(i - 1) * count + k];
 			ax[k].n = labs(d[k]);
@@ -1273,12 +1277,14 @@ int move_path(int count, const int *mi, int npts, const long *pts,
 					     fmax(0, end - s))));
 			int fire[MAX_MOTORS];
 
-			if (stop_req) {
-				/* Ctrl-C: decelerate along the path to a stop */
+			if (stop_req || soft == 1) {
+				/* Ctrl-C or path_stop: decelerate to a stop */
 				end = fmin(end, s + (v * v - v0 * v0) /
 					   (2 * accel));
+				if (stop_req)
+					*interrupted = 1;
 				stop_req = 0;
-				*interrupted = 1;
+				soft = 2;
 			}
 			if (s >= end)
 				break;
