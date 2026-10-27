@@ -1,0 +1,13 @@
+App(
+    appid="scara_ir",
+    name="SCARA IR",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="scara_ir_app",
+    requires=["gui", "notification"],
+    stack_size=2 * 1024,
+    fap_category="Infrared",
+    fap_icon="scara_10px.png",
+    fap_version="1.0",
+    fap_author="jonardan",
+    fap_description="Drive the OpenSCARA tip with the d-pad: each arrow sends its NEC code while held",
+)
