@@ -9,7 +9,10 @@ TMC2209CTL_SITE = $(TMC2209CTL_PKGDIR)/src
 TMC2209CTL_SITE_METHOD = local
 TMC2209CTL_LICENSE = MIT
 
+# clean first: binaries left in src/ by a host 'make test' are rsynced in
+# with the sources and would otherwise be installed as they are (x86)
 define TMC2209CTL_BUILD_CMDS
+	$(MAKE) -C $(@D) clean
 	$(TARGET_MAKE_ENV) $(MAKE) $(TARGET_CONFIGURE_OPTS) -C $(@D)
 endef
 
