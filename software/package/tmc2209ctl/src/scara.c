@@ -77,6 +77,7 @@ static void usage(void)
 "                        P8_16): press UP, DOWN, RIGHT, LEFT when asked,\n"
 "                        then each press moves the tip MM mm (default 5),\n"
 "                        held = keeps going; up is away from the table.\n"
+"                        No table check (max_y_mm): you watch the tip.\n"
 "                        Needs homing.  ir test prints the button codes\n"
 "\n"
 "  Angles: shoulder from the +X axis, elbow from the line of link 1\n"
@@ -602,9 +603,10 @@ static int cmd_jog(int argc, char **argv)
  * known in advance, so the four arrow buttons are learned first, then
  * each press moves the tip MM mm (default IR_STEP_MM) in a straight line,
  * and holding a button keeps it moving.  The arm stands upright with the
- * table on +Y, so up is -Y (away from the table) and right is +X.  A step
- * the arm can't make (out of reach, past a joint limit, into the table)
- * is refused and the tip stays.  Ctrl-C ends.  'ir test' only prints the
+ * table on +Y, so up is -Y (away from the table) and right is +X.  The
+ * table check (max_y_mm) is off: whoever holds the remote watches the
+ * tip.  A step out of reach or past a joint limit is refused and the tip
+ * stays.  Ctrl-C ends.  'ir test' only prints the
  * code of every button pressed.
  */
 #define IR_STEP_MM	5
@@ -640,6 +642,7 @@ static int cmd_ir(int argc, char **argv)
 	if (!test) {
 		if (get_arm(&a))
 			return -1;
+		a.table_on = 0;
 		if (get_angles(th)) {
 			err("the arm is not homed; run 'scara home'");
 			return -1;
